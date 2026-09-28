@@ -154,19 +154,26 @@ func TestAdminProtectionFromDeletion(t *testing.T) {
 	repo := newMockUserRepo()
 	sm := NewSecurityManager(repo)
 
-	_, _ = sm.Register("main_admin", "pass1")
-	_, _ = sm.Register("worker", "pass2")
+	_, _ = sm.RegisterWithRole(SuperuserUsername, "pass1", domain.RoleAdmin)
+	_, _ = sm.RegisterWithRole("worker", "pass2", domain.RoleOperator)
+	_, _ = sm.RegisterWithRole("a", "pass3", domain.RoleAdmin)
 
-	// Attempt to delete admin must fail
-	err := sm.DeleteUser("main_admin")
+	// Attempt to delete superuser must fail
+	err := sm.DeleteUser(SuperuserUsername)
 	if err == nil {
-		t.Fatalf("Expected deleting admin to fail, got nil")
+		t.Fatalf("Expected deleting superuser to fail, got nil")
 	}
 
 	// Deleting operator must succeed
 	err = sm.DeleteUser("worker")
 	if err != nil {
 		t.Fatalf("Expected deleting operator to succeed, got %v", err)
+	}
+
+	// Deleting secondary admin 'a' must succeed
+	err = sm.DeleteUser("a")
+	if err != nil {
+		t.Fatalf("Expected deleting secondary admin 'a' to succeed, got %v", err)
 	}
 }
 

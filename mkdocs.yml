@@ -1,0 +1,107 @@
+# ==============================================================================
+# Noxfort Monitor™ — MkDocs Configuration (Material for MkDocs)
+# Industrial Telemetry Ingestion, Observability & Incident Response Orchestration
+# Copyright (C) 2026 — Noxfort Systems
+# ==============================================================================
+
+site_name: "Noxfort Monitor™ — Technical Documentation"
+site_description: "Internal technical documentation for Noxfort Monitor — Industrial Telemetry Ingestion, Observability & Incident Response Orchestration."
+site_author: "Gabriel Moraes — Noxfort Systems"
+copyright: "Copyright &copy; 2026 — Noxfort Systems"
+
+# ==============================================================================
+# Theme
+# ==============================================================================
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/monitor-dashboard
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: cyan
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Light Mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: cyan
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Dark Mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.path
+    - navigation.instant
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+# ==============================================================================
+# Markdown Extensions
+# ==============================================================================
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+# ==============================================================================
+# Plugins
+# ==============================================================================
+plugins:
+  - search
+
+# ==============================================================================
+# Navigation
+# ==============================================================================
+nav:
+  - Overview: index.md
+  - Master MOC: INDEX.md
+  - Multi-Language Hub: README.md
+  - Core & Architecture:
+    - System Architecture: ../ARCHITECTURE.md
+    - Protocols & Ingestion API: API_REFERENCE.md
+    - Dual-Engine Database: DATABASE.md
+    - Security & RBAC: SECURITY.md
+  - Networking & Hardware:
+    - Remote Access (DuckDNS & Ngrok): REMOTE_ACCESS.md
+    - Caddy Reverse Proxy & HTTPS: CADDY_INTEGRATION.md
+    - Desktop App & Headless: DESKTOP_APP.md
+    - Audit Trail & SLA: AUDIT_TRAIL.md
+  - Operations & QA:
+    - Deployment Guide: DEPLOYMENT.md
+    - Testing & Diagnostics: TESTING.md
+    - Developer Guides: DEVELOPER_GUIDES.md
+    - Technical Decisions: RESEARCH_NOTES.md
+
+# ==============================================================================
+# Extra CSS
+# ==============================================================================
+extra_css:
+  - stylesheets/extra.css

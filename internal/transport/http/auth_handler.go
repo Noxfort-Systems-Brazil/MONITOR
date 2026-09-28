@@ -25,6 +25,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"time"
 
 	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
@@ -137,8 +138,10 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
+		Expires:  time.Unix(1, 0),
 		MaxAge:   -1,
 		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
 	})
 
 	if r.Header.Get("Accept") == "application/json" {

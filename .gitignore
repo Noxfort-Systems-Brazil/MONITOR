@@ -19,7 +19,16 @@ mosquitto/log/*
 auth_config.json
 credentials.json
 *.local.json
+mosquitto/config/passwd*
+*.pem
+*.key
+
+# Backups do Banco de Dados
+backups/
+*.bak
 
 # Pacotes e artefatos de build
 *.deb
 build_deb/
+node_modules/
+coverage/

@@ -14,25 +14,32 @@ Noxfort Monitor combines the rapid iteration of web frontend technologies with t
 
 ```mermaid
 graph TD
-    subgraph "Noxfort Monitor Core Process"
+    subgraph "Noxfort Monitor Host Process"
         Main[cmd/server/main.go]
-        HTTP[Local HTTP Server :8080]
-        IPC[Single-Instance Socket Server]
+        Lock[AcquireLockOrActivate - syscall.Flock]
+        ExtHTTP[External Ingestion HTTP Server :22100]
+        IPC[Single-Instance XDG Domain Socket Listener]
         Tray[internal/tray - GTK Systray]
         
-        subgraph "Wails v2 Runtime"
-            WailsApp[desktop.App]
-            WebKit[WebKitGTK Window]
+        subgraph "Internal Desktop Routing"
+            DesktopMux[DesktopHandler - Full Webview Routing]
             SessionBridge[desktopResponseWriter - Cookie Sync]
+        end
+
+        subgraph "Wails v2 Desktop Runtime"
+            WailsApp[desktop.App]
+            WebKit[WebKitGTK Native Window]
         end
     end
 
+    Main --> Lock
+    Lock -->|Lock Acquired| ExtHTTP
     Main -->|Standard Desktop Mode| WailsApp
     WailsApp --> WebKit
-    WebKit -->|Custom AssetServer| SessionBridge
-    SessionBridge --> HTTP
-    WailsApp -->|Callbacks| Tray
-    Main -->|--headless Mode| HTTP
+    WebKit -->|AssetServer Bridge| SessionBridge
+    SessionBridge --> DesktopMux
+    WailsApp -->|Tray Registration| Tray
+    Main -->|--headless Mode| ExtHTTP
 ```
 
 ### Technical Specifications:
@@ -42,16 +49,20 @@ graph TD
 
 ---
 
-## 2. Single-Instance Enforcement (IPC Lock)
+## 2. Single-Instance Enforcement (Atomic Kernel Lock & IPC)
 
-To avoid network port collisions (MQTT `:1883`, HTTP `:8080`) and duplicated processes on the same host, Monitor uses a dual locking mechanism:
+To guarantee database integrity and prevent network port collisions (`:1883`, `:22100`), Noxfort Monitor enforces a robust dual locking mechanism ([`internal/desktop/singleinstance.go`](../internal/desktop/singleinstance.go)):
 
-1. **Unix IPC Socket ([`internal/desktop/singleinstance.go`](../internal/desktop/singleinstance.go))**:
-   - Before initializing the graphical UI, `desktop.TryActivateExisting()` attempts to connect to a local Unix domain socket (`/tmp/noxfort-monitor-singleinstance.sock`).
-   - If an existing instance is running, the new process sends an activation command ("`ACTIVATE`") and exits cleanly with exit code `0`.
-   - The active running instance receives the signal over the socket, un-minimizes its window, and brings it to the foreground via `desktopApp.RestoreWindow()`.
-2. **Wails SingleInstanceLock**:
-   - A secondary protection layer in the Wails runtime provides identical enforcement across window managers.
+1. **Atomic Kernel File Lock (`syscall.Flock`) via `AcquireLockOrActivate()`**:
+   - The primary instance acquires an exclusive, non-blocking kernel lock (`LOCK_EX | LOCK_NB`) on a dedicated lock file:
+     `$XDG_RUNTIME_DIR/noxfort-monitor.lock` (with automatic fallback to `/tmp/noxfort-monitor-<uid>.lock`).
+   - If an instance is already active, `Flock` returns an error (`ErrAlreadyRunning`). The new process automatically delegates activation to `desktop.TryActivateExisting()` and exits immediately with code `0`.
+2. **Unix Domain IPC Socket**:
+   - The primary process listens on `$XDG_RUNTIME_DIR/noxfort-monitor.sock` (or `/tmp/noxfort-monitor-<uid>.sock`).
+   - Subsequent process launches write an `ACTIVATE` command to this socket.
+   - Upon receiving the command, the running instance restores its minimized or hidden window and brings it to the top of the desktop workspace via `desktopApp.RestoreWindow()`.
+3. **Wails SingleInstanceLock**:
+   - A complementary protection layer in the Wails runtime provides secondary protection across different desktop environments.
 
 ---
 
@@ -61,7 +72,7 @@ The [`internal/tray/tray.go`](../internal/tray/tray.go) package integrates direc
 * **Embedded Asset**: The official Noxfort icon is compiled into the Go binary via `//go:embed icon.png`.
 * **Context Menu**:
   * **Open Dashboard**: Restores the graphical window and brings it to the top of the desktop workspace.
-  * **Shutdown / Quit**: Triggers a clean graceful shutdown, stopping the Watchdog Engine, disconnecting from the MQTT broker, terminating the Ngrok tunnel, and releasing database connections.
+  * **Shutdown / Quit**: Triggers a clean graceful shutdown, stopping the Watchdog Engine, disconnecting from the MQTT broker, terminating the active WAN service (DuckDNS / Ngrok), and releasing database connections.
 
 ---
 
@@ -83,10 +94,12 @@ make run-headless
 ```
 
 ### What Headless Mode Does:
-1. Disables Wails v2 and WebKitGTK window initialization.
-2. Disables the IPC window activation socket server.
-3. Initializes the HTTP server, MQTT client, Watchdog Engine, and Ngrok tunnel normally.
-4. Listens for standard OS termination signals (`SIGINT`, `SIGTERM`) to perform a graceful shutdown.
+1. **Disables GUI Initialization**: Bypasses Wails v2 and WebKitGTK window creation entirely.
+2. **Disables IPC Activation Listener**: Skips GUI window restore socket listeners while maintaining system stability.
+3. **Runs External Ingestion Listener**: Starts `ExternalIngestionHandler` on port `22100` solely for accepting IoT sensor data (`POST /api/telemetry`).
+4. **Autonomous Operation**: Operates MQTT client subscriptions, silent failure detection (Watchdog Engine), DuckDNS dynamic DNS updates, and automated email/Telegram alert dispatching.
+5. **Security Isolation**: Direct browser access to dashboard HTML pages is blocked with HTTP 403 Forbidden. Headless nodes operate purely as telemetry collectors and incident alert dispatchers.
+6. **Graceful Shutdown**: Listens for standard OS termination signals (`SIGINT`, `SIGTERM`) to release locks and cleanly terminate.
 
 ---
 

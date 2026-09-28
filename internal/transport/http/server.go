@@ -24,11 +24,12 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 	"noxfort-monitor-server/internal/monitor"
 	"noxfort-monitor-server/internal/tunnel"
@@ -57,6 +58,8 @@ type Server struct {
 	telemetryHandler *TelemetryHandler
 	browserHandler   *BrowserHandler
 	tunnelHandler    *TunnelHandler
+	healthHandler    *HealthHandler
+	metricsHandler   *MetricsHandler
 
 	authMiddleware *AuthMiddleware
 
@@ -95,6 +98,9 @@ func NewServer(
 		auditH = NewAuditHandler(auditRepo)
 	}
 
+	healthH := NewHealthHandler(dbService, nil, dRepo)
+	metricsH := NewMetricsHandler(dbService, nil, dRepo)
+
 	return &Server{
 		addr:             addr,
 		dashboardHandler: NewDashboardHandler(dRepo, tRepo),
@@ -108,104 +114,114 @@ func NewServer(
 		telemetryHandler: NewTelemetryHandler(sm),
 		browserHandler:   NewBrowserHandler(),
 		tunnelHandler:    NewTunnelHandler(sRepo, tm),
+		healthHandler:    healthH,
+		metricsHandler:   metricsH,
 		authMiddleware:   NewAuthMiddleware(authHandler),
 	}
 }
 
-// Handler configures the HTTP ServeMux and applies the security middleware.
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-
-	// 1. Static Assets (Public)
-	fs := http.FileServer(http.Dir(appdir.Path("web/static")))
-	mux.Handle("/static/", http.StripPrefix("/static/", fs))
-
-	// 2. Authentication Pages & APIs
-	mux.HandleFunc("/login", s.authHandler.ServeLogin)
-	mux.HandleFunc("/register", s.authHandler.ServeRegister)
-	mux.HandleFunc("/api/auth/login", s.authHandler.HandleLogin)
-	mux.HandleFunc("/api/auth/register", s.userHandler.HandleRegister)
-	mux.HandleFunc("/api/auth/logout", s.authHandler.HandleLogout)
-	mux.HandleFunc("/api/auth/status", s.authHandler.HandleStatus)
-
-	// 3. IoT Telemetry API (HTTP POST Ingest)
-	mux.HandleFunc("/api/telemetry", s.telemetryHandler.HandleIngest)
-
-	// 4. Protected Application Routes
-	mux.HandleFunc("/", s.dashboardHandler.ServePage)
-
-	// System Management
-	mux.HandleFunc("/devices", s.deviceHandler.ServePage)
-	mux.HandleFunc("/devices/delete", s.deviceHandler.HandleDelete)
-
-	// Response Team (Contacts)
-	mux.HandleFunc("/contacts", s.contactHandler.ServePage)
-	mux.HandleFunc("/contacts/create", s.contactHandler.HandleCreate)
-	mux.HandleFunc("/contacts/update", s.contactHandler.HandleUpdate)
-	mux.HandleFunc("/contacts/delete", s.contactHandler.HandleDelete)
-
-	// Remote Access & Ingestion Tunnel (Ngrok)
-	mux.HandleFunc("/remote", s.tunnelHandler.ServePage)
-	mux.HandleFunc("/api/tunnel/status", s.tunnelHandler.HandleStatus)
-	mux.HandleFunc("/api/tunnel/save", s.tunnelHandler.HandleSave)
-	mux.HandleFunc("/api/tunnel/start", s.tunnelHandler.HandleStart)
-	mux.HandleFunc("/api/tunnel/stop", s.tunnelHandler.HandleStop)
-
-	// Settings
-	mux.HandleFunc("/settings", s.settingsHandler.ServePage)
-	mux.HandleFunc("/settings/save", s.settingsHandler.HandleSave)
-	mux.HandleFunc("/settings/test", s.settingsHandler.HandleTest)
-	mux.HandleFunc("/settings/test-telegram", s.settingsHandler.HandleTestTelegram)
-
-	// Database Management & Server Configuration
-	if s.databaseHandler != nil {
-		mux.HandleFunc("/server", s.databaseHandler.ServePage)
-		mux.HandleFunc("/api/settings/database/status", s.databaseHandler.HandleStatus)
-		mux.HandleFunc("/api/settings/database/test", s.databaseHandler.HandleTest)
-		mux.HandleFunc("/api/settings/database/save", s.databaseHandler.HandleSave)
-		mux.HandleFunc("/api/settings/database/provision-user", s.databaseHandler.HandleProvisionUser)
+// SetMQTTStatus attaches an MQTT client status provider for health probes and Prometheus metrics.
+func (s *Server) SetMQTTStatus(mqttStatus MQTTStatusProvider) {
+	if s.healthHandler != nil {
+		s.healthHandler.mqttStatus = mqttStatus
 	}
-
-	// Audit Trail
-	if s.auditHandler != nil {
-		mux.HandleFunc("/audit", s.auditHandler.ServePage)
-		mux.HandleFunc("/api/audit/security", s.auditHandler.HandleSecurityLogs)
-		mux.HandleFunc("/api/audit/alerts", s.auditHandler.HandleAlertLogs)
-		mux.HandleFunc("/api/audit/transitions", s.auditHandler.HandleTransitionLogs)
+	if s.metricsHandler != nil {
+		s.metricsHandler.mqttStatus = mqttStatus
 	}
-
-	// Account Management
-	mux.HandleFunc("/users", s.userHandler.ServePage)
-	mux.HandleFunc("/api/users", s.userHandler.HandleList)
-	mux.HandleFunc("/api/users/create", s.userHandler.HandleCreateUser)
-	mux.HandleFunc("/api/users/delete", s.userHandler.HandleDelete)
-
-	// 5. Open External Links in Default Browser
-	mux.HandleFunc("/api/open-external", s.browserHandler.HandleOpenExternal)
-
-	// 6. Window Controls (Fallback for standalone browser/headless mode)
-	mux.HandleFunc("/api/window/toggle-fullscreen", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"desktop": false,
-		})
-	})
-	mux.HandleFunc("/api/window/exit-fullscreen", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"desktop": false,
-		})
-	})
-
-	// Wrap routing tree with Auth and RBAC middleware
-	return s.authMiddleware.Wrap(mux)
 }
 
-// Run configures the routes and starts the listening loop.
+// SetBackupService attaches a backup service to the database handler.
+func (s *Server) SetBackupService(bs BackupService) {
+	if s.databaseHandler != nil {
+		s.databaseHandler.SetBackupService(bs)
+	}
+}
+
+// ExternalIngestionHandler returns an HTTP handler restricted strictly to IoT telemetry ingestion.
+// Direct browser access to dashboard/admin UI routes over external HTTP ports is completely blocked,
+// enforcing that user interaction happens exclusively inside the native desktop application.
+func (s *Server) ExternalIngestionHandler() http.Handler {
+	mux := http.NewServeMux()
+
+	// 1. Telemetry Ingestion for field agents (Carina, Synapse, IoT)
+	mux.HandleFunc("/api/telemetry", s.telemetryHandler.HandleIngest)
+
+	// 2. All other routes: Block browser access with 403 Forbidden
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":   "Forbidden",
+				"message": "O Noxfort Monitor opera exclusivamente como aplicativo desktop nativo. O acesso à interface pelo navegador está desativado.",
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noxfort Monitor™ · Acesso Restrito</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            max-width: 520px;
+            width: 100%;
+            padding: 36px 30px;
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.6);
+        }
+        h2 { color: #f0ad4e; margin: 0 0 16px 0; font-size: 1.5rem; }
+        p { color: #8b949e; line-height: 1.5; font-size: 0.95rem; margin: 0 0 12px 0; }
+        .badge {
+            display: inline-block;
+            background: #21262d;
+            color: #58a6ff;
+            border: 1px solid #30363d;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-top: 16px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Noxfort Monitor™</h2>
+        <p><strong>Acesso via navegador desativado.</strong></p>
+        <p>O Noxfort Monitor opera exclusivamente como um <strong>aplicativo desktop nativo</strong>.</p>
+        <p>Para interagir com o painel de controle, utilize a janela do aplicativo aberta no computador.</p>
+        <div class="badge">Porta de Telemetria Ativa: POST /api/telemetry</div>
+    </div>
+</body>
+</html>`)
+	})
+
+	return mux
+}
+
+// Run configures the external telemetry ingestion listener and starts the listening loop.
 func (s *Server) Run() error {
-	handler := s.Handler()
+	handler := s.ExternalIngestionHandler()
 
 	s.httpServer = &http.Server{
 		Addr:         s.addr,
@@ -214,7 +230,7 @@ func (s *Server) Run() error {
 		WriteTimeout: 15 * time.Second,
 	}
 
-	log.Printf("🌍 HTTP Server listening on %s", s.addr)
+	log.Printf("🌍 External Telemetry Listener running on %s (Ingestion only: POST /api/telemetry)", s.addr)
 	return s.httpServer.ListenAndServe()
 }
 

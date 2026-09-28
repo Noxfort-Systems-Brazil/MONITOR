@@ -24,6 +24,7 @@ package tunnel
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -91,12 +92,14 @@ func (m *mockDriver) Wait() error {
 func TestManager_DefaultInitialization(t *testing.T) {
 	mock := newMockDriver(true)
 	mgr := NewManager(mock, "")
-
-	if mgr.localPort != "8080" {
-		t.Errorf("Expected default localPort 8080, got %s", mgr.localPort)
+	if mgr.localPort != "22100" {
+		t.Errorf("Expected default localPort 22100, got %s", mgr.localPort)
 	}
 
 	status := mgr.GetStatus()
+	if status.LocalPort != "22100" {
+		t.Errorf("Expected status LocalPort 22100, got %s", status.LocalPort)
+	}
 	if status.State != StateOffline {
 		t.Errorf("Expected initial state OFFLINE, got %s", status.State)
 	}
@@ -170,5 +173,44 @@ func TestManager_DriverStartFailure(t *testing.T) {
 	status := mgr.GetStatus()
 	if status.State != StateError {
 		t.Errorf("Expected state ERROR, got %s", status.State)
+	}
+}
+
+type mockTesterDriver struct {
+	*mockDriver
+	testResult *TestResult
+	testErr    error
+}
+
+func (m *mockTesterDriver) Test(ctx context.Context, token, domain string) (*TestResult, error) {
+	if m.testErr != nil {
+		return nil, m.testErr
+	}
+	if m.testResult != nil {
+		return m.testResult, nil
+	}
+	return &TestResult{Success: true, Message: "driver test ok"}, nil
+}
+
+func TestManager_TestConnection(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Driver does not implement Tester
+	baseMock := newMockDriver(true)
+	mgrNonTester := NewManager(baseMock, "22100")
+	_, err := mgrNonTester.TestConnection(ctx, "tok", "dom")
+	if err == nil || !strings.Contains(err.Error(), "não suporta testes ativos") {
+		t.Errorf("Expected unsupported error, got %v", err)
+	}
+
+	// 2. Driver implements Tester
+	testerMock := &mockTesterDriver{mockDriver: newMockDriver(true)}
+	mgrTester := NewManager(testerMock, "22100")
+	res, err := mgrTester.TestConnection(ctx, "tok", "dom")
+	if err != nil {
+		t.Fatalf("Expected successful test, got %v", err)
+	}
+	if !res.Success || res.Message != "driver test ok" {
+		t.Errorf("Unexpected result: %+v", res)
 	}
 }

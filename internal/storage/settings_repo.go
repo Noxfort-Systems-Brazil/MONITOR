@@ -127,7 +127,8 @@ func (r *SettingsRepositorySQLite) GetSettings() (*domain.Settings, error) {
 	SELECT 
 		id, smtp_host, smtp_port, smtp_user, smtp_pass, 
 		smtp_from, admin_email, mqtt_address, enabled, telegram_bot_token,
-		COALESCE(ngrok_auth_token, ''), COALESCE(ngrok_domain, ''), COALESCE(ngrok_enabled, false)
+		COALESCE(ngrok_auth_token, ''), COALESCE(ngrok_domain, ''), COALESCE(ngrok_enabled, false),
+		COALESCE(duckdns_token, ''), COALESCE(duckdns_domain, ''), COALESCE(duckdns_enabled, false)
 	FROM settings 
 	WHERE id = 1;`
 
@@ -146,6 +147,9 @@ func (r *SettingsRepositorySQLite) GetSettings() (*domain.Settings, error) {
 		&s.NgrokAuthToken,
 		&s.NgrokDomain,
 		&s.NgrokEnabled,
+		&s.DuckDNSToken,
+		&s.DuckDNSDomain,
+		&s.DuckDNSEnabled,
 	)
 
 	if err != nil {
@@ -181,7 +185,10 @@ func (r *SettingsRepositorySQLite) SaveSettings(s *domain.Settings) error {
 		telegram_bot_token = ?,
 		ngrok_auth_token = ?,
 		ngrok_domain = ?,
-		ngrok_enabled = ?
+		ngrok_enabled = ?,
+		duckdns_token = ?,
+		duckdns_domain = ?,
+		duckdns_enabled = ?
 	WHERE id = 1;`, driver)
 
 	_, err := db.Exec(query,
@@ -197,6 +204,9 @@ func (r *SettingsRepositorySQLite) SaveSettings(s *domain.Settings) error {
 		s.NgrokAuthToken,
 		s.NgrokDomain,
 		s.NgrokEnabled,
+		s.DuckDNSToken,
+		s.DuckDNSDomain,
+		s.DuckDNSEnabled,
 	)
 
 	if err != nil {

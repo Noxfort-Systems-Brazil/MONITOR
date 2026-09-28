@@ -22,66 +22,19 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 
 	"noxfort-monitor-server/internal/domain"
 	"noxfort-monitor-server/internal/tunnel"
 )
-
-type mockTunnelService struct {
-	mu           sync.Mutex
-	status       tunnel.Status
-	startErr     error
-	stopErr      error
-	startedToken string
-	startedDom   string
-	isAvailable  bool
-}
-
-func (m *mockTunnelService) Start(authToken, domain string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.startedToken = authToken
-	m.startedDom = domain
-	if m.startErr != nil {
-		return m.startErr
-	}
-	m.status.State = tunnel.StateOnline
-	m.status.PublicURL = "https://" + domain
-	m.status.TelemetryURL = "https://" + domain + "/api/telemetry"
-	return nil
-}
-
-func (m *mockTunnelService) Stop() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopErr != nil {
-		return m.stopErr
-	}
-	m.status.State = tunnel.StateOffline
-	m.status.PublicURL = ""
-	m.status.TelemetryURL = ""
-	return nil
-}
-
-func (m *mockTunnelService) GetStatus() tunnel.Status {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.status
-}
-
-func (m *mockTunnelService) IsBinaryAvailable() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.isAvailable
-}
 
 func TestTunnelHandler_HandleStatus(t *testing.T) {
 	repo := &mockSettingsRepoForHandler{
@@ -122,9 +75,9 @@ func TestTunnelHandler_HandleSave(t *testing.T) {
 	handler := NewTunnelHandler(repo, mockSvc)
 
 	formData := url.Values{}
-	formData.Set("ngrok_auth_token", "my_secret_token_123")
-	formData.Set("ngrok_domain", "custom.ngrok-free.app")
-	formData.Set("ngrok_enabled", "on")
+	formData.Set("duckdns_token", "my_secret_token_123")
+	formData.Set("duckdns_domain", "noxfort-lab")
+	formData.Set("duckdns_enabled", "on")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/save", strings.NewReader(formData.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -137,14 +90,14 @@ func TestTunnelHandler_HandleSave(t *testing.T) {
 	}
 
 	saved, _ := repo.GetSettings()
-	if saved.NgrokAuthToken != "my_secret_token_123" {
-		t.Errorf("Expected saved token 'my_secret_token_123', got '%s'", saved.NgrokAuthToken)
+	if saved.DuckDNSToken != "my_secret_token_123" {
+		t.Errorf("Expected saved token 'my_secret_token_123', got '%s'", saved.DuckDNSToken)
 	}
-	if saved.NgrokDomain != "custom.ngrok-free.app" {
-		t.Errorf("Expected saved domain 'custom.ngrok-free.app', got '%s'", saved.NgrokDomain)
+	if saved.DuckDNSDomain != "noxfort-lab" {
+		t.Errorf("Expected saved domain 'noxfort-lab', got '%s'", saved.DuckDNSDomain)
 	}
-	if !saved.NgrokEnabled {
-		t.Errorf("Expected NgrokEnabled to be true, got false")
+	if !saved.DuckDNSEnabled {
+		t.Errorf("Expected DuckDNSEnabled to be true, got false")
 	}
 
 	if mockSvc.startedToken != "my_secret_token_123" {
@@ -152,56 +105,147 @@ func TestTunnelHandler_HandleSave(t *testing.T) {
 	}
 }
 
-func TestTunnelHandler_HandleStartWithoutToken(t *testing.T) {
+func TestTunnelHandler_HandleSave_DoesNotAutoConnect(t *testing.T) {
 	repo := &mockSettingsRepoForHandler{
 		settings: &domain.Settings{},
 	}
 	mockSvc := &mockTunnelService{}
 	handler := NewTunnelHandler(repo, mockSvc)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/start", nil)
+	formData := url.Values{}
+	formData.Set("duckdns_token", "my_saved_token")
+	formData.Set("duckdns_domain", "noxfort-saved")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/save", strings.NewReader(formData.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.HandleStart(rec, req)
+	handler.HandleSave(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("Expected status 400 when starting without token, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	saved, _ := repo.GetSettings()
+	if saved.DuckDNSToken != "my_saved_token" || saved.DuckDNSDomain != "noxfort-saved" {
+		t.Errorf("Expected token and domain saved, got token=%s, domain=%s", saved.DuckDNSToken, saved.DuckDNSDomain)
+	}
+	if saved.DuckDNSEnabled {
+		t.Errorf("Expected DuckDNSEnabled to remain false when saving without auto-start")
+	}
+	if mockSvc.startedToken != "" {
+		t.Errorf("Expected tunnelService NOT to start, but was started with %s", mockSvc.startedToken)
 	}
 }
 
-func TestTunnelHandler_HandleStartFailure(t *testing.T) {
+func TestTunnelHandler_HandleSave_Multipart(t *testing.T) {
 	repo := &mockSettingsRepoForHandler{
-		settings: &domain.Settings{
-			NgrokAuthToken: "token",
-			NgrokDomain:    "domain",
-		},
+		settings: &domain.Settings{},
 	}
-	mockSvc := &mockTunnelService{
-		startErr: errors.New("simulated error"),
-	}
+	mockSvc := &mockTunnelService{}
 	handler := NewTunnelHandler(repo, mockSvc)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/start", nil)
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+	_ = w.WriteField("duckdns_token", "multipart_token")
+	_ = w.WriteField("duckdns_domain", "multipart_subdomain")
+	_ = w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/save", &b)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.HandleStart(rec, req)
+	handler.HandleSave(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("Expected status 500 when start fails, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+
+	saved, _ := repo.GetSettings()
+	if saved.DuckDNSToken != "multipart_token" {
+		t.Errorf("Expected saved token 'multipart_token', got '%s'", saved.DuckDNSToken)
+	}
+	if saved.DuckDNSDomain != "multipart_subdomain" {
+		t.Errorf("Expected saved domain 'multipart_subdomain', got '%s'", saved.DuckDNSDomain)
 	}
 }
 
-func TestTunnelHandler_HandleStop(t *testing.T) {
+func TestTunnelHandler_HandleTest_MissingCredentials(t *testing.T) {
 	repo := &mockSettingsRepoForHandler{settings: &domain.Settings{}}
 	mockSvc := &mockTunnelService{}
 	handler := NewTunnelHandler(repo, mockSvc)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/stop", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/test", nil)
 	rec := httptest.NewRecorder()
 
-	handler.HandleStop(rec, req)
+	handler.HandleTest(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400 when testing without credentials, got %d", rec.Code)
+	}
+}
+
+func TestTunnelHandler_HandleTest_Success(t *testing.T) {
+	repo := &mockSettingsRepoForHandler{
+		settings: &domain.Settings{
+			DuckDNSToken:  "tok-123",
+			DuckDNSDomain: "my-sub",
+		},
+	}
+	mockSvc := &mockTunnelService{}
+	handler := NewTunnelHandler(repo, mockSvc)
+
+	formData := url.Values{}
+	formData.Set("duckdns_token", "tok-123")
+	formData.Set("duckdns_domain", "my-sub")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/test", strings.NewReader(formData.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.HandleTest(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200, got %d", rec.Code)
+		t.Fatalf("Expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+
+	var result tunnel.TestResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("Failed to decode JSON result: %v", err)
+	}
+
+	if !result.Success {
+		t.Errorf("Expected result.Success to be true")
+	}
+	if mockSvc.testedToken != "tok-123" || mockSvc.testedDom != "my-sub" {
+		t.Errorf("Expected service to be called with tok-123 and my-sub, got %s and %s", mockSvc.testedToken, mockSvc.testedDom)
+	}
+}
+
+func TestTunnelHandler_HandleTest_ServiceError(t *testing.T) {
+	repo := &mockSettingsRepoForHandler{
+		settings: &domain.Settings{
+			DuckDNSToken:  "tok-123",
+			DuckDNSDomain: "my-sub",
+		},
+	}
+	mockSvc := &mockTunnelService{
+		testErr: errors.New("duckdns rejection: KO"),
+	}
+	handler := NewTunnelHandler(repo, mockSvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tunnel/test", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleTest(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400 when test fails, got %d", rec.Code)
+	}
+
+	if !strings.Contains(rec.Body.String(), "duckdns rejection: KO") {
+		t.Errorf("Expected body to contain error message, got %s", rec.Body.String())
 	}
 }

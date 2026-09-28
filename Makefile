@@ -43,10 +43,21 @@ clean:
 	rm -f monitor_logs.db
 	@echo "✨ Clean complete."
 
-# 4. Run automated tests
-test:
-	@echo "🧪 Running Tests..."
+# 4. Lint and Static Analysis
+lint:
+	@echo "🔍 Running static analysis (go vet)..."
+	go vet ./...
+
+# 5. Run automated tests (Backend + Frontend)
+test: test-backend test-frontend
+
+test-backend:
+	@echo "🧪 Running Backend Tests..."
 	go test ./... -v
+
+test-frontend:
+	@echo "🧪 Running Frontend Tests..."
+	npm test
 
 # 5. Install/Update Dependencies
 deps:
@@ -101,9 +112,66 @@ broker-install:
 	sudo apt-get update -qq && sudo apt-get install -y mosquitto
 	@echo "✅ Mosquitto installed."
 
+# 10b. Configure Mosquitto Password and Authentication
+broker-auth:
+	@chmod +x scripts/setup_mqtt_auth.sh
+	@./scripts/setup_mqtt_auth.sh
+
+# 10c. Create and manage Database Backups
+backup:
+	@chmod +x scripts/backup.sh
+	@./scripts/backup.sh
+
+backup-list:
+	@echo "📦 Existing Database Backups:"
+	@mkdir -p backups && ls -lh backups/
+
 # 11. Generate .deb Installer Package
 deb:
 	@chmod +x build_installer.sh
 	@./build_installer.sh
 
-.PHONY: all build run clean test deps build-linux broker-start broker-stop broker-status broker-install deb
+# ---- Caddy & Edge Reverse Proxy (Docker) ----
+
+DOCKER_COMPOSE := $(shell if command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; elif docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo ""; fi)
+
+# 12. Build Caddy image with DuckDNS plugin
+caddy-build:
+	@echo "🔨 Building Caddy image with DuckDNS DNS-01 plugin..."
+	@if [ -n "$(DOCKER_COMPOSE)" ]; then \
+		$(DOCKER_COMPOSE) build caddy; \
+	else \
+		docker build -t noxfort-caddy ./caddy; \
+	fi
+	@echo "✅ Caddy build complete."
+
+# 13. Start edge services (Mosquitto + Caddy)
+services-start:
+	@echo "🟢 Starting edge services (Mosquitto + Caddy)..."
+	@if [ -n "$(DOCKER_COMPOSE)" ]; then \
+		$(DOCKER_COMPOSE) up -d; \
+		echo "✅ Services started. Caddy listening on ports 80/443."; \
+	else \
+		echo "⚠️  Docker Compose não encontrado. Instale com: sudo apt install docker-compose-v2"; \
+		exit 1; \
+	fi
+
+# 14. Stop edge services
+services-stop:
+	@echo "🔴 Stopping edge services..."
+	@if [ -n "$(DOCKER_COMPOSE)" ]; then \
+		$(DOCKER_COMPOSE) down; \
+		echo "✅ Services stopped."; \
+	else \
+		echo "⚠️  Docker Compose não encontrado."; \
+	fi
+
+# 15. View Caddy and Mosquitto live logs
+services-logs:
+	@if [ -n "$(DOCKER_COMPOSE)" ]; then \
+		$(DOCKER_COMPOSE) logs -f caddy; \
+	else \
+		echo "⚠️  Docker Compose não encontrado."; \
+	fi
+
+.PHONY: all build run run-headless clean lint test test-backend test-frontend deps build-linux broker-start broker-stop broker-status broker-install broker-auth backup backup-list deb caddy-build services-start services-stop services-logs

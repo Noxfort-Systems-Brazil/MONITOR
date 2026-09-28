@@ -100,8 +100,8 @@
                                                 </div>
                                                 <div>
                                                     <span class="fw-bold font-monospace">{{ .Username }}</span>
-                                                    {{ if eq .Role "ADMIN" }}
-                                                    <span class="badge bg-warning bg-opacity-25 text-warning border border-warning ms-2 small">Super / Admin</span>
+                                                    {{ if eq .Username $.Superuser }}
+                                                    <span class="badge bg-warning bg-opacity-25 text-warning border border-warning ms-2 small">Superuser</span>
                                                     {{ end }}
                                                 </div>
                                             </div>
@@ -117,12 +117,12 @@
                                             {{ .CreatedAt.Format "2006-01-02 15:04" }}
                                         </td>
                                         <td class="text-end pe-4">
-                                            {{ if eq .Role "ADMIN" }}
-                                            <button class="btn btn-outline-secondary btn-sm" disabled title="A conta de Administrador não pode ser excluída">
+                                            {{ if eq .Username $.Superuser }}
+                                            <button class="btn btn-outline-secondary btn-sm" disabled title="A conta de Superusuário não pode ser excluída">
                                                 <i class="fa-solid fa-lock"></i>
                                             </button>
                                             {{ else }}
-                                            <button class="btn btn-outline-danger btn-sm btn-delete-user" data-username="{{ .Username }}" title="Remover Operador">
+                                            <button class="btn btn-outline-danger btn-sm btn-delete-user" data-username="{{ .Username }}" title="Remover Usuário">
                                                 <i class="fa-solid fa-trash-can"></i>
                                             </button>
                                             {{ end }}
@@ -204,7 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const username = btn.getAttribute('data-username');
             if (!username) return;
 
-            if (!confirm(`Deseja remover a conta do operador "${username}"?`)) {
+            if (!confirm(`Deseja remover a conta do usuário "${username}"?`)) {
                 return;
             }
 
@@ -219,7 +219,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const data = await res.json();
                 if (res.ok && data.success) {
-                    showAlert(`✅ Operador "${username}" excluído.`, 'success');
+                    if (data.self_deleted) {
+                        alert(`Sua conta "${username}" foi excluída. Você será redirecionado para a tela de login.`);
+                        window.location.href = '/login';
+                        return;
+                    }
+                    showAlert(`✅ Usuário "${username}" excluído com sucesso.`, 'success');
                     const row = document.getElementById(`user-row-${username}`);
                     if (row) row.remove();
                 } else {

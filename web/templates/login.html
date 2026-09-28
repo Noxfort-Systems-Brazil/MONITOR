@@ -70,6 +70,7 @@
 </div>
 
 <script>
+try { localStorage.removeItem('noxfort_session'); } catch(e){}
 const form = document.getElementById('loginForm');
 const alertBox = document.getElementById('feedback-alert');
 const submitBtn = document.getElementById('btn-submit');

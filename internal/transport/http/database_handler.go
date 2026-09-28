@@ -33,11 +33,18 @@ type DatabaseService interface {
 	Switch(newCfg domain.DatabaseConfig, migrate bool) error
 }
 
+// BackupService defines operations for creating and retrieving database backups.
+type BackupService interface {
+	CreateBackup() (domain.BackupMetadata, error)
+	ListBackups() ([]domain.BackupMetadata, error)
+}
+
 // DatabaseHandler manages database connection settings, testing, and schema provisioning APIs.
 type DatabaseHandler struct {
-	dbService   DatabaseService
-	auditRepo   domain.AuditRepository
-	provisioner DatabaseUserProvisioner
+	dbService     DatabaseService
+	auditRepo     domain.AuditRepository
+	provisioner   DatabaseUserProvisioner
+	backupService BackupService
 }
 
 // NewDatabaseHandler initializes the DatabaseHandler with the default PostgreSQL provisioner.
@@ -52,6 +59,11 @@ func NewDatabaseHandlerWithProvisioner(dbService DatabaseService, auditRepo doma
 		auditRepo:   auditRepo,
 		provisioner: provisioner,
 	}
+}
+
+// SetBackupService attaches a BackupService to handle database backup requests.
+func (h *DatabaseHandler) SetBackupService(bs BackupService) {
+	h.backupService = bs
 }
 
 // ServePage renders the dedicated Server & Database configuration page.
@@ -165,4 +177,69 @@ func (h *DatabaseHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Banco de dados configurado com sucesso no schema '%s'!", cfg.Schema),
 		"status":  h.dbService.GetStatus(),
 	})
+}
+
+// HandleBackup creates a database backup snapshot.
+func (h *DatabaseHandler) HandleBackup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.backupService == nil {
+		w.WriteHeader(http.StatusNotImplemented)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Serviço de backup não configurado",
+		})
+		return
+	}
+
+	info, err := h.backupService.CreateBackup()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Falha ao gerar backup: %v", err),
+		})
+		return
+	}
+
+	if h.auditRepo != nil {
+		_ = h.auditRepo.SaveSecurityAuditLog(&domain.SecurityAuditLog{
+			Username:  "admin",
+			Action:    "DATABASE_BACKUP_CREATED",
+			Details:   fmt.Sprintf("Arquivo: %s, Tamanho: %d bytes, Motor: %s", info.Filename, info.SizeBytes, info.Driver),
+			CreatedAt: time.Now(),
+		})
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Backup gerado com sucesso!",
+		"backup":  info,
+	})
+}
+
+// HandleListBackups returns all existing database backup files.
+func (h *DatabaseHandler) HandleListBackups(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if h.backupService == nil {
+		_ = json.NewEncoder(w).Encode([]domain.BackupMetadata{})
+		return
+	}
+
+	list, err := h.backupService.ListBackups()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Falha ao listar backups: %v", err),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(list)
 }

@@ -188,7 +188,8 @@ func (sm *SecurityManager) ListUsers() ([]*domain.User, error) {
 	return sm.userRepo.List()
 }
 
-// DeleteUser removes an operator account.
+// DeleteUser removes an operator or secondary administrator account.
+// Only the designated master superuser (SuperuserUsername resolved from .env or config) is protected from deletion.
 func (sm *SecurityManager) DeleteUser(username string) error {
 	username = strings.TrimSpace(username)
 	user, err := sm.userRepo.GetByUsername(username)
@@ -196,13 +197,13 @@ func (sm *SecurityManager) DeleteUser(username string) error {
 		return errors.New("Usuário não encontrado")
 	}
 
-	if user.Role == domain.RoleAdmin {
-		return errors.New("Não é permitido excluir o Administrador do sistema")
+	if strings.EqualFold(username, SuperuserUsername) {
+		return fmt.Errorf("não é permitido excluir a conta de superusuário do sistema ('%s')", SuperuserUsername)
 	}
 
 	if err := sm.userRepo.DeleteByUsername(username); err != nil {
 		return err
 	}
-	sm.logAudit(username, "USER_DELETE", "Conta de operador excluída", "")
+	sm.logAudit(username, "USER_DELETE", fmt.Sprintf("Conta de usuário '%s' (%s) excluída", username, user.Role), "")
 	return nil
 }

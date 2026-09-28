@@ -80,7 +80,7 @@ RestartSec=5
 WorkingDirectory=/home/noxfort
 
 # Environment variables
-Environment="PORT=8080"
+Environment="PORT=22100"
 EnvironmentFile=-/home/noxfort/.env
 
 # Resource limits (optional)
@@ -95,9 +95,11 @@ Create `/home/noxfort/.env`:
 ```ini
 MONITOR_ADMIN_USER=corporate_admin
 MONITOR_ADMIN_PASSWORD=StrongEncryptedPassword123!
-PORT=8080
+MQTT_USER=noxfort_user
+MQTT_PASSWORD=SuperSecureMqttPass2026!
+PORT=22100
 ```
-Restrict file permissions:
+Restrict file permissions (mandatory for security):
 ```bash
 sudo chmod 600 /home/noxfort/.env
 sudo chown noxfort:noxfort /home/noxfort/.env
@@ -133,17 +135,26 @@ For high-concurrency environments and regulatory compliance:
    CREATE USER user_monitor WITH PASSWORD 'your_secure_password';
    GRANT ALL PRIVILEGES ON DATABASE noxfort_database TO user_monitor;
    ```
-3. **Connect via Dashboard**:
-   Access `/server` or submit a `POST` request to `/api/settings/database/save` targeting PostgreSQL. The system automatically creates `schema_monitor`, tables, and indices. See [Database & Dual-Engine Persistence](DATABASE.md).
+3. **Connect via Desktop Application**:
+   Open the native desktop window, access the Database settings tab (`/server`) or invoke the API endpoint `/api/settings/database/save` targeting PostgreSQL. The system automatically creates `schema_monitor`, tables, and indices. See [Database & Dual-Engine Persistence](DATABASE.md).
 
 ---
 
-## 5. NGINX Reverse Proxy with SSL Termination
+## 5. Edge Reverse Proxy & SSL Termination (Caddy or NGINX)
 
-While Noxfort Monitor includes built-in authentication and RBAC via [`AuthMiddleware`](SECURITY.md), placing an NGINX reverse proxy in front provides SSL termination and DDoS mitigation.
+To expose telemetry ingestion securely over the public internet, a reverse proxy provides TLS/SSL termination and DDoS mitigation:
 
-### Example NGINX Configuration:
-Create `/etc/nginx/sites-available/noxfort-monitor`:
+### 5.1 Option A: Caddy Server with DuckDNS (Recommended)
+Noxfort Monitor provides a turnkey Docker-based Caddy edge gateway with automated **DNS-01 ACME challenges** via DuckDNS, eliminating manual certificate renewal and opening ports 80/443 securely. See [Caddy Reverse Proxy & DuckDNS](CADDY_INTEGRATION.md).
+
+```bash
+# Build Caddy with DuckDNS plugin and start Mosquitto + Caddy
+make caddy-build
+make services-start
+```
+
+### 5.2 Option B: Custom NGINX Reverse Proxy
+If deploying on a server with an existing NGINX instance, configure SSL termination for the telemetry ingestion endpoint:
 
 ```nginx
 server {
@@ -161,12 +172,10 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
-    # Telemetry ingestion and web console
-    location / {
-        proxy_pass http://127.0.0.1:8080;
+    # Telemetry ingestion endpoint for external IoT edge nodes
+    location /api/telemetry {
+        proxy_pass http://127.0.0.1:22100;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -174,23 +183,57 @@ server {
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
     }
+
+    # Browser requests to root return 403 Forbidden by design
+    location / {
+        proxy_pass http://127.0.0.1:22100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
 }
 ```
 
-Enable the configuration:
+> [!NOTE]
+> Direct web browser access to HTML dashboard routes returns **403 Forbidden**. Operator interactions are performed exclusively via the native desktop application.
+
+---
+
+## 6. Remote Access: DuckDNS vs Ngrok Tunnel
+
+When the server operates behind industrial firewalls or carrier-grade NAT (CGNAT) without public static IPs:
+* **DuckDNS + Caddy (Dynamic DNS)**: The recommended architecture for public access with port forwarding or native IPv6. See [Caddy Integration](CADDY_INTEGRATION.md).
+* **Ngrok Reverse Tunnel (Zero-Port-Forwarding)**: When inbound ports cannot be opened, Ngrok creates an encrypted outbound tunnel to receive telemetry from remote agents (Carina, Synapse). See [Remote Access Guide](REMOTE_ACCESS.md).
+
+---
+
+## 7. Automated Backups in Production
+
+Configure an automated daily backup job using cron:
+
 ```bash
-sudo ln -s /etc/nginx/sites-available/noxfort-monitor /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+# Edit the noxfort user's crontab
+sudo crontab -u noxfort -e
+
+# Add a daily backup scheduled at 03:00 AM with automatic 7-day retention:
+0 3 * * * /opt/noxfort-monitor/scripts/backup.sh >> /var/log/noxfort-backup.log 2>&1
 ```
 
 ---
 
-## 6. Remote Access via Ngrok Tunnel (No Inbound Port Forwarding)
+## 8. Production Observability & Metrics
 
-When the server operates behind industrial firewalls or carrier-grade NAT (CGNAT) without public static IPs or DNS:
-* Follow the instructions in [Remote Access & Ngrok Tunnel](REMOTE_ACCESS.md).
-* The tunnel establishes an outbound connection with a static domain, allowing remote agents (Synapse and Carina) to post telemetry to `https://your-domain.ngrok-free.app/api/telemetry`.
+For enterprise monitoring platforms (e.g., Prometheus, Grafana, Datadog):
+1. **Liveness Probe**: Configure container/load balancer health checks pointing to `http://<server-ip>:22100/healthz`.
+2. **Prometheus Scraping Job**: Add the following target to `/etc/prometheus/prometheus.yml`:
+   ```yaml
+   scrape_configs:
+     - job_name: 'noxfort-monitor'
+       scrape_interval: 15s
+       metrics_path: '/metrics'
+       static_configs:
+         - targets: ['127.0.0.1:22100']
+   ```
 
 ---
 

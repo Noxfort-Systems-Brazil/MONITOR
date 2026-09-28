@@ -30,6 +30,7 @@ import (
 
 	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
+	"noxfort-monitor-server/internal/security"
 )
 
 // UserManagementService defines user account operations required by HTTP transport.
@@ -43,6 +44,7 @@ type UserManagementService interface {
 // SessionValidator verifies active sessions and user roles.
 type SessionValidator interface {
 	ValidateSession(token string) (string, string, bool)
+	RevokeSession(token string)
 }
 
 // UserHandler manages user accounts and operator administration.
@@ -130,14 +132,14 @@ func (h *UserHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(users)
 }
 
-// HandleDelete removes an operator account (ADMIN only).
+// HandleDelete removes an account (ADMIN only). Only the superuser cannot be deleted.
 func (h *UserHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	_, role, isAuth := h.GetSessionUser(r)
+	currentUsername, role, isAuth := h.GetSessionUser(r)
 	if !isAuth || role != domain.RoleAdmin {
 		http.Error(w, "Acesso não autorizado: privilégios de administrador necessários", http.StatusForbidden)
 		return
@@ -149,6 +151,8 @@ func (h *UserHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isSelfDelete := strings.EqualFold(username, currentUsername)
+
 	if err := h.userService.DeleteUser(username); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
@@ -159,7 +163,28 @@ func (h *UserHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[USERS] User '%s' removed by Administrator.", username)
+	if isSelfDelete {
+		if token := ExtractSessionToken(r); token != "" {
+			h.sessionValidator.RevokeSession(token)
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+		})
+		log.Printf("[USERS] User '%s' deleted their own account. Session terminated.", username)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":      true,
+			"self_deleted": true,
+			"message":      "Sua própria conta foi excluída com sucesso. Sessão encerrada.",
+		})
+		return
+	}
+
+	log.Printf("[USERS] User '%s' removed by Administrator '%s'.", username, currentUsername)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -197,6 +222,7 @@ func (h *UserHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 
 	data := map[string]interface{}{
 		"CurrentUser": username,
+		"Superuser":   security.SuperuserUsername,
 		"Role":        role,
 		"IsAdmin":     true,
 		"Users":       users,

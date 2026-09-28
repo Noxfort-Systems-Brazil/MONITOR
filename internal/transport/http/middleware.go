@@ -51,6 +51,9 @@ func isPublicPath(path string) bool {
 		path == "/api/auth/status" ||
 		path == "/api/telemetry" ||
 		path == "/api/open-external" ||
+		path == "/healthz" ||
+		path == "/api/health" ||
+		path == "/metrics" ||
 		strings.HasPrefix(path, "/api/window/")
 }
 
@@ -79,6 +82,10 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+
+		// Prevent browser from caching protected views in memory/disk bfcache
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
 
 		// 2. Verify active session
 		_, role, isAuth := m.authInspector.GetSessionUser(r)

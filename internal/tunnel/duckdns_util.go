@@ -1,0 +1,63 @@
+// Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
+// Copyright (C) 2026 Gabriel Moraes - Noxfort Systems
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+//
+// File: internal/tunnel/duckdns_util.go
+// Author: Gabriel Moraes
+// Date: 2026-09-14
+// Description: Utility and network detection functions for DuckDNS integration.
+
+package tunnel
+
+import (
+	"net"
+	"strings"
+)
+
+// CleanDuckDNSToken strips whitespace and quotes from DuckDNS tokens.
+func CleanDuckDNSToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.Trim(raw, `"'`)
+	return strings.TrimSpace(raw)
+}
+
+// CleanDuckDNSDomain extracts the subdomain name from a user string.
+// E.g. "my-monitor.duckdns.org" -> "my-monitor", "https://my-monitor" -> "my-monitor".
+func CleanDuckDNSDomain(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "https://")
+	raw = strings.TrimPrefix(raw, "http://")
+	raw = strings.TrimSuffix(raw, "/")
+	raw = strings.TrimSuffix(raw, ".duckdns.org")
+	return strings.TrimSpace(raw)
+}
+
+// DetectGlobalIPv6 inspects network interfaces and returns the first public global unicast IPv6.
+func DetectGlobalIPv6() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP == nil {
+			continue
+		}
+
+		ip := ipNet.IP
+		// Check if it is an IPv6 address and not an IPv4-mapped address
+		if ip.To4() == nil && ip.To16() != nil {
+			// Must be global unicast, not link-local, loopback, or private ULA (fc00::/7)
+			if ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() {
+				return ip.String()
+			}
+		}
+	}
+
+	return ""
+}

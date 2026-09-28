@@ -67,7 +67,7 @@ func (h *DeviceHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "22100"
 	}
 
 	// Prefer the unified Ngrok Telemetry URL

@@ -92,3 +92,53 @@ func TestAuthMiddleware_UnauthenticatedAccess(t *testing.T) {
 		t.Fatalf("Expected status 401 on unauthenticated POST /api/users/create, got %d", recCreate.Code)
 	}
 }
+
+func TestExternalIngestionHandler_BlocksBrowserAccess(t *testing.T) {
+	server := NewServer("", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	ingestionHandler := server.ExternalIngestionHandler()
+
+	// 1. Browser GET request to root "/" must return 403 Forbidden
+	reqRoot := httptest.NewRequest(http.MethodGet, "/", nil)
+	recRoot := httptest.NewRecorder()
+	ingestionHandler.ServeHTTP(recRoot, reqRoot)
+
+	if recRoot.Code != http.StatusForbidden {
+		t.Fatalf("Expected status 403 Forbidden on browser GET /, got %d", recRoot.Code)
+	}
+	bodyRoot := recRoot.Body.String()
+	if !strings.Contains(bodyRoot, "Acesso via navegador desativado") {
+		t.Errorf("Expected blocked message in body, got: %s", bodyRoot)
+	}
+
+	// 2. Browser GET request to "/login" must return 403 Forbidden
+	reqLogin := httptest.NewRequest(http.MethodGet, "/login", nil)
+	recLogin := httptest.NewRecorder()
+	ingestionHandler.ServeHTTP(recLogin, reqLogin)
+
+	if recLogin.Code != http.StatusForbidden {
+		t.Fatalf("Expected status 403 Forbidden on browser GET /login, got %d", recLogin.Code)
+	}
+
+	// 3. Browser GET request to "/devices" must return 403 Forbidden
+	reqDevices := httptest.NewRequest(http.MethodGet, "/devices", nil)
+	recDevices := httptest.NewRecorder()
+	ingestionHandler.ServeHTTP(recDevices, reqDevices)
+
+	if recDevices.Code != http.StatusForbidden {
+		t.Fatalf("Expected status 403 Forbidden on browser GET /devices, got %d", recDevices.Code)
+	}
+
+	// 4. JSON request to blocked path must return 403 Forbidden JSON
+	reqJSON := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	reqJSON.Header.Set("Accept", "application/json")
+	recJSON := httptest.NewRecorder()
+	ingestionHandler.ServeHTTP(recJSON, reqJSON)
+
+	if recJSON.Code != http.StatusForbidden {
+		t.Fatalf("Expected status 403 Forbidden on JSON GET /api/auth/status, got %d", recJSON.Code)
+	}
+	if !strings.Contains(recJSON.Body.String(), "Forbidden") {
+		t.Errorf("Expected Forbidden JSON response, got: %s", recJSON.Body.String())
+	}
+}
+

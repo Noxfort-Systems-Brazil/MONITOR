@@ -38,6 +38,12 @@ Both MQTT messages and HTTP REST requests must transmit the structured JSON body
 * **`message`** (*String*, required): Human-readable operational message.
 * **`occurred_at`** (*ISO-8601 Timestamp*, required): Precise timestamp when the event occurred at the origin.
 
+### 1.3 Broker Authentication & Security
+The MQTT broker enforces mandatory authentication (`allow_anonymous false`):
+* **Credential Setup**: Run `make broker-auth` or `./scripts/setup_mqtt_auth.sh <user> <pass>` to configure the PBKDF2 password file (`mosquitto/config/passwd`).
+* **Go Client Integration**: Reads `MQTT_USER` and `MQTT_PASSWORD` from `.env` or system environment variables, or extracts credentials embedded directly in broker connection strings (`tcp://user:pass@127.0.0.1:1883`).
+* **Edge Devices (`mosquitto_pub`)**: Must specify `-u <username> -P <password>` when publishing messages.
+
 ---
 
 ## 2. Telemetry Ingestion via HTTP REST
@@ -49,9 +55,12 @@ Designed for field nodes (such as **Carina**, **Synapse**, or cURL/Python script
 * **Content-Type**: `application/json`
 * **Body**: Identical to the universal `IncomingEvent` JSON structure.
 
+> [!IMPORTANT]
+> **External Port Scope**: In production runtime (`ExternalIngestionHandler`), `POST /api/telemetry` is the **only route** exposed externally on port `22100`. Browser attempts to access HTML dashboard or administrative routes return **403 Forbidden**. Administrative interactions are performed within the native desktop container.
+
 #### Request Example:
 ```bash
-curl -X POST http://localhost:8080/api/telemetry \
+curl -X POST http://localhost:22100/api/telemetry \
   -H "Content-Type: application/json" \
   -d '{
     "category": "SOFTWARE",
@@ -116,28 +125,44 @@ Returns the authentication state of the current session.
 
 ---
 
-## 5. Remote Access & Ngrok Tunnel (`/api/tunnel`)
+## 5. Remote Access & WAN Tunnel API (`/api/tunnel`)
 
-Refer to [Remote Access via Ngrok](REMOTE_ACCESS.md) for conceptual details.
+Refer to [Remote Access & WAN Ingestion](REMOTE_ACCESS.md) for conceptual and setup details.
 
 ### 5.1 `GET /api/tunnel/status`
-Returns tunnel health and the public telemetry endpoint:
+Returns real-time WAN ingestion status, active provider, public endpoints, and connection parameters:
 ```json
 {
-  "active": true,
-  "public_url": "https://my-monitor.ngrok-free.app",
-  "telemetry_url": "https://my-monitor.ngrok-free.app/api/telemetry",
-  "domain": "my-monitor.ngrok-free.app",
-  "started_at": "2026-09-05T14:00:00Z",
+  "state": "ONLINE",
+  "provider": "DuckDNS",
+  "public_url": "https://noxfort-monitor.duckdns.org",
+  "telemetry_url": "https://noxfort-monitor.duckdns.org/api/telemetry",
+  "domain": "noxfort-monitor",
   "binary_found": true,
-  "error": ""
+  "ipv6_address": "2804:14d:...",
+  "local_port": "22100",
+  "use_https": true,
+  "error_message": "",
+  "started_at": "01:30:00 28/09/2026"
 }
 ```
 
-### 5.2 Additional Tunnel Operations:
-* `POST /api/tunnel/save`: Saves credentials (`ngrok_auth_token`, `ngrok_domain`, `ngrok_enabled`).
-* `POST /api/tunnel/start`: Launches the tunnel process on demand.
-* `POST /api/tunnel/stop`: Terminates the external connection.
+### 5.2 Additional Tunnel Endpoints:
+* `POST /api/tunnel/save`: Persists WAN configuration. Supports DuckDNS (`duckdns_token`, `duckdns_domain`, `duckdns_enabled`) and Ngrok parameters.
+* `POST /api/tunnel/start`: Triggers dynamic DNS update or opens reverse tunnel on demand.
+* `POST /api/tunnel/stop`: Terminates the active tunnel or pauses DuckDNS auto-updates on boot.
+* `POST /api/tunnel/disconnect`: Clears stored WAN credentials from the database and terminates service.
+* `POST /api/tunnel/test`: Validates DuckDNS credentials and DNS resolution actively without modifying settings.
+  * **Payload Response (`200 OK`)**:
+    ```json
+    {
+      "success": true,
+      "message": "Conexão DuckDNS validada com sucesso!",
+      "domain": "noxfort-monitor.duckdns.org",
+      "resolved_ips": ["177.136.20.10"],
+      "ipv6_active": true
+    }
+    ```
 
 ---
 
@@ -172,6 +197,29 @@ Applies new credentials to the [`DBManager`](../internal/storage/db_manager.go).
 ### 6.4 `POST /api/settings/database/provision-user`
 Provisions a dedicated schema-restricted user using PostgreSQL administrative credentials.
 
+### 6.5 `POST /api/settings/database/backup`
+Triggers an immediate, non-blocking hot database backup:
+* **SQLite**: Executes `VACUUM INTO` to produce a consistent binary `.db` snapshot in `backups/`.
+* **PostgreSQL**: Invokes `pg_dump` with custom compression.
+* **Rotation**: Automatically retains the latest 7 daily snapshots.
+* **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "message": "Backup gerado com sucesso!",
+    "backup": {
+      "filename": "monitor_sqlite_20260928_022930.db",
+      "file_path": "/home/user/.../backups/monitor_sqlite_20260928_022930.db",
+      "size_bytes": 4096,
+      "driver": "sqlite",
+      "created_at": "2026-09-28T02:29:30Z"
+    }
+  }
+  ```
+
+### 6.6 `GET /api/settings/database/backups`
+Returns an array of all available backup files sorted by creation date descending.
+
 ---
 
 ## 7. Audit Trail (`/api/audit`)
@@ -197,6 +245,70 @@ Endpoints used to dispatch verification alerts on demand:
 * `POST /api/open-external`: Accepts `{"url": "https://..."}` and directs the operating system to open the link in the user's default browser (`xdg-open` on Linux).
 * `POST /api/window/toggle-fullscreen`: Toggles the Wails window between fullscreen and normal mode.
 * `POST /api/window/exit-fullscreen`: Exits fullscreen mode.
+
+---
+
+## 10. Observability & Application Diagnostics
+
+Noxfort Monitor provides public diagnostic and metrics endpoints for infrastructure monitoring, container health probes, and Prometheus scrapers (exempt from authentication middleware):
+
+### 10.1 `GET /healthz`
+Liveness probe endpoint. Responds with `200 OK` and payload `"OK\n"` when the HTTP server is alive and accepting traffic.
+
+### 10.2 `GET /api/health`
+Deep diagnostic health endpoint returning component connectivity, memory statistics, and process metadata.
+* **Success (`200 OK`)**: System is `healthy` or `degraded`.
+* **Service Unavailable (`503 Service Unavailable`)**: Critical components (active database) are offline.
+* **Payload Example**:
+  ```json
+  {
+    "status": "healthy",
+    "timestamp": "2026-09-28T02:29:30Z",
+    "uptime_seconds": 1240,
+    "components": {
+      "database": {
+        "status": "up",
+        "type": "sqlite",
+        "latency_ms": 2,
+        "error": ""
+      },
+      "mqtt": {
+        "connected": true,
+        "status": "up"
+      },
+      "devices": {
+        "count": 14
+      }
+    },
+    "system": {
+      "goroutines": 28,
+      "heap_alloc_mb": 18,
+      "heap_sys_mb": 34,
+      "num_gc": 4,
+      "go_version": "go1.22.2"
+    }
+  }
+  ```
+
+### 10.3 `GET /metrics`
+Prometheus metrics exporter endpoint in text exposition format (`version 0.0.4`):
+```promql
+# HELP noxfort_uptime_seconds Application uptime in seconds.
+# TYPE noxfort_uptime_seconds gauge
+noxfort_uptime_seconds 1240
+
+# HELP noxfort_goroutines Current number of running goroutines.
+# TYPE noxfort_goroutines gauge
+noxfort_goroutines 28
+
+# HELP noxfort_db_status Active database connection status (1 = connected, 0 = disconnected).
+# TYPE noxfort_db_status gauge
+noxfort_db_status{type="sqlite"} 1
+
+# HELP noxfort_mqtt_connected MQTT broker connection status (1 = connected, 0 = disconnected).
+# TYPE noxfort_mqtt_connected gauge
+noxfort_mqtt_connected 1
+```
 
 ---
 

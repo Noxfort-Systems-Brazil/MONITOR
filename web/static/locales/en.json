@@ -23,7 +23,7 @@
   "dash_no_events": "No recent incidents recorded.",
   "dev_title": "Monitored Systems",
   "dev_add_btn": "Register System",
-  "dev_server_host_label": "Telemetry Address (Ngrok)",
+  "dev_server_host_label": "Telemetry Address (DuckDNS)",
   "dev_server_host_hint": "Paste this address into the Synapse, Carina or external program configuration.",
   "dev_copy_ip": "Copy Address",
   "dev_copied": "Copied!",

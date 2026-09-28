@@ -12,6 +12,7 @@ import (
 
 func TestDBManager_SQLite(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("MONITOR_DB_CONFIG_PATH", filepath.Join(tempDir, "database_config.json"))
 	dbPath := filepath.Join(tempDir, "test.db")
 
 	cfg := domain.DatabaseConfig{

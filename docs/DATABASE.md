@@ -96,14 +96,24 @@ The [`internal/storage/migrator.go`](../internal/storage/migrator.go) module imp
 ### Migrated Entities:
 1. **Devices (`devices`)**: Display name, source identifier (`identifier`), last heartbeat (`last_seen`), and monitoring flag (`enabled`).
 2. **Contacts (`contacts`)**: Name, email, phone, operational role (`role`), notification preferences (`notify_critical`, `enabled`), and Telegram Chat ID.
-3. **Global Settings (`settings`)**: SMTP parameters, MQTT broker address, Ngrok tokens/domain, and global alert dispatch toggle.
+3. **Global Settings (`settings`)**: SMTP parameters, MQTT broker address, DuckDNS credentials (`duckdns_token`, `duckdns_domain`, `duckdns_enabled`), Ngrok parameters (`ngrok_auth_token`, `ngrok_domain`, `ngrok_enabled`), and global alert dispatch toggle.
 4. **Users & Operators (`users`)**: Operator accounts along with salted cryptographic hashes and RBAC privileges.
 
 The migrator leverages database transactions and conflict resolution clauses to ensure **idempotency** (preventing duplicate entries in target databases).
 
 ---
 
-## 5. SQL Dialects & Query Adapter (`AdaptQuery`)
+## 5. High-Throughput Batch Ingestion (`BufferedTelemetryWriter`)
+
+To withstand severe IoT event storms without saturating disk I/O or exhausting database connection pools, persistence is managed through [`BufferedTelemetryWriter`](../internal/storage/buffered_telemetry_writer.go):
+* **Channel Queue**: Telemetry records are enqueued non-blockingly into an in-memory buffered channel (`chan TelemetryRecord`).
+* **Periodic & Volume Flushes**: A dedicated background worker flushes queued batches upon reaching `batchSize` (default: 50 events) or when `flushInterval` expires (default: 100ms).
+* **Saturation Fallback**: If the queue fills up completely under peak load, the writer immediately falls back to synchronous write to ensure **zero data loss**.
+* **Graceful Termination**: On system shutdown, `Close()` guarantees that all remaining in-flight events are flushed to disk before closing database handles.
+
+---
+
+## 6. SQL Dialects & Query Adapter (`AdaptQuery`)
 
 Noxfort Monitor's SQL layer maintains a single shared codebase between SQLite and PostgreSQL without relying on heavy ORM frameworks.
 
@@ -113,25 +123,26 @@ The [`QueryAdapter`](../internal/storage/query_adapter.go) adapts queries at run
 
 ---
 
-## 6. PostgreSQL Schema and User Provisioning
+## 7. PostgreSQL Schema and User Provisioning
 
-### 6.1 Idempotent Schema Initialization (`InitPostgresSchema`)
+### 7.1 Idempotent Schema Initialization (`InitPostgresSchema`)
 The DDL module ([`postgres_schema.go`](../internal/storage/postgres_schema.go)) guarantees:
 * Secure schema creation: `CREATE SCHEMA IF NOT EXISTS "schema_monitor";`.
 * Proper session `search_path` configuration.
 * Creation of core tables: `devices`, `contacts`, `settings`, `telemetry_logs`, `users`.
+* Idempotent migration of DuckDNS and WAN configuration columns.
 * Creation of audit tables: `security_audit_logs`, `alert_dispatch_logs`, `device_state_transitions`.
 * Fast B-tree indices for timestamps and device identifiers.
 
-### 6.2 Administrative User Provisioning (`ProvisionPostgresUser`)
-Via [`internal/storage/postgres_admin.go`](../internal/storage/postgres_admin.go), administrators can provision dedicated, least-privilege PostgreSQL users directly from the web dashboard:
+### 7.2 Administrative User Provisioning (`ProvisionPostgresUser`)
+Via [`internal/storage/postgres_admin.go`](../internal/storage/postgres_admin.go), administrators can provision dedicated, least-privilege PostgreSQL users directly from the desktop management console:
 * Temporarily connects using supplied administrative credentials (e.g., `postgres`).
 * Creates the dedicated user account (`CREATE USER ... WITH PASSWORD ...`).
 * Grants privileges scoped strictly to the Monitor schema (`GRANT USAGE ON SCHEMA ...`, `GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ...`).
 
 ---
 
-## 7. Table Schemas
+## 8. Table Schemas
 
 ```mermaid
 erDiagram
@@ -167,6 +178,9 @@ erDiagram
         text ngrok_auth_token
         text ngrok_domain
         boolean ngrok_enabled
+        text duckdns_token
+        text duckdns_domain
+        boolean duckdns_enabled
     }
     telemetry_logs {
         bigserial id PK
@@ -194,6 +208,29 @@ erDiagram
         text ip_address
     }
 ```
+
+---
+
+## 9. Automated Hot Backups & Retention Strategy
+
+Noxfort Monitor features a zero-downtime database backup engine implemented in [`internal/storage/backup.go`](../internal/storage/backup.go):
+
+### 9.1 Non-Blocking Hot Snapshots
+* **SQLite Mode**: Executes the atomic SQL command `VACUUM INTO '<destination_path>'`. This copies the active database safely into a clean, defragmented `.db` snapshot on disk without blocking active concurrent write or read transactions.
+* **PostgreSQL Mode**: Uses `pg_dump` with custom binary compression (`-F c`) to create an encrypted, restorable `.sql` snapshot.
+
+### 9.2 File Retention & Rotation Policy
+* Backups are saved to `backups/monitor_<driver>_YYYYMMDD_HHMMSS.<ext>` with owner-only permissions (`0600`).
+* The engine automatically prunes historical snapshots older than the retention threshold (**default: 7 days / keep latest 7 files**).
+
+### 9.3 Invocation Interfaces
+1. **Makefile Command**:
+   ```bash
+   make backup       # Generates snapshot
+   make backup-list  # Lists existing backups
+   ```
+2. **Cron / CLI Script**: [`scripts/backup.sh`](../scripts/backup.sh).
+3. **HTTP REST API**: `POST /api/settings/database/backup` (authenticated via Web UI or Desktop window).
 
 ---
 

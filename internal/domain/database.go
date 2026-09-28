@@ -42,3 +42,12 @@ type DatabaseStatus struct {
 	Version      string    `json:"version"`
 	ErrorMessage string    `json:"error_message,omitempty"`
 }
+
+// BackupMetadata holds snapshot details for database backups.
+type BackupMetadata struct {
+	Filename  string    `json:"filename"`
+	FilePath  string    `json:"file_path"`
+	SizeBytes int64     `json:"size_bytes"`
+	Driver    string    `json:"driver"`
+	CreatedAt time.Time `json:"created_at"`
+}

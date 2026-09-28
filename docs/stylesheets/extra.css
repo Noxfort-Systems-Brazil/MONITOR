@@ -1,0 +1,15 @@
+/* Noxfort Monitor Documentation - Custom Extra CSS */
+:root {
+  --md-primary-fg-color: #0288d1;
+  --md-accent-fg-color: #00e5ff;
+}
+
+/* Custom styles for mermaid diagrams and tables */
+.mermaid {
+  text-align: center;
+  margin: 1.5em 0;
+}
+
+table {
+  width: 100%;
+}

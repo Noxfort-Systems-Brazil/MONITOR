@@ -10,13 +10,24 @@ This document outlines the testing standards and procedures for **Noxfort Monito
 
 ## 1. Running the Automated Test Suite
 
-The project maintains comprehensive unit test coverage across all internal packages (`internal/monitor`, `internal/security`, `internal/storage`, `internal/transport/http`, `internal/desktop`, `internal/protocol`, `internal/tunnel`).
+The project maintains comprehensive test coverage across both the Go backend and the JavaScript web interface:
 
-To execute all automated tests with verbose reporting:
 ```bash
+# Run the complete test suite (Backend Go + Frontend Vitest)
 make test
+
+# Run Go backend unit tests specifically (with race detector)
+make test-backend
+
+# Run Frontend DOM unit tests via Vitest
+make test-frontend
+
+# Run static analysis and linting (go vet)
+make lint
 ```
-*Under the hood, the Makefile runs `go test ./... -v`.*
+
+### 1.1 Continuous Integration (CI/CD Pipeline)
+All tests, race detection, static analysis, and security checks execute automatically on every push and pull request via [GitHub Actions](../.github/workflows/ci.yml).
 
 ---
 
@@ -58,11 +69,12 @@ graph LR
 ## 3. Manual E2E Testing
 
 ### 3.1 MQTT Ingestion Test (`mosquitto_pub`)
-Ensure the local broker is running (`make broker-start`):
+Ensure the local broker is running with configured credentials (`make broker-auth && make broker-start`):
 
 #### 1. Simulate Normal Heartbeat (Keep-alive)
 ```bash
-mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
+mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secret_pass_2026}" \
+  -t "noxfort/devices/pump-01/telemetry" -m '{
   "category": "HARDWARE",
   "origin": "pump-01",
   "level": "INFO",
@@ -74,7 +86,8 @@ mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
 
 #### 2. Simulate Critical Hardware Incident
 ```bash
-mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
+mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secret_pass_2026}" \
+  -t "noxfort/devices/pump-01/telemetry" -m '{
   "category": "HARDWARE",
   "origin": "pump-01",
   "level": "CRITICAL",
@@ -90,7 +103,7 @@ mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
 To validate the `POST /api/telemetry` route utilized by remote edge agents:
 
 ```bash
-curl -X POST http://localhost:8080/api/telemetry \
+curl -X POST http://localhost:22100/api/telemetry \
   -H "Content-Type: application/json" \
   -d '{
     "category": "SOFTWARE",
@@ -110,6 +123,41 @@ The [`ChannelTester`](../internal/monitor/tester.go) module enables on-demand va
 
 * **SMTP Test (Email)**: On the UI Settings tab (`/settings`) or via `POST /settings/test`, the system sends a verification email to administrators.
 * **Telegram Test**: On the `/settings` screen or via `POST /settings/test-telegram`, the system formats and transmits a MarkdownV2 test message to the configured chat.
+
+---
+
+## 5. Observability & Health Probes Verification
+
+Verify that application metrics and diagnostics are operating as intended:
+
+```bash
+# 1. Verify liveness probe
+curl -i http://localhost:22100/healthz
+
+# 2. Inspect comprehensive component diagnostics and latency
+curl -s http://localhost:22100/api/health | jq .
+
+# 3. Inspect Prometheus exposition telemetry
+curl -s http://localhost:22100/metrics | grep "noxfort_"
+```
+
+---
+
+## 6. Database Backup & Integrity Verification
+
+Test automated hot database snapshots and check backup integrity:
+
+```bash
+# 1. Generate hot snapshot
+make backup
+
+# 2. List backups
+make backup-list
+
+# 3. Validate SQLite snapshot integrity
+sqlite3 backups/monitor_sqlite_*.db "PRAGMA integrity_check;"
+# Expected output: ok
+```
 
 ---
 

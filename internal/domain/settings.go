@@ -36,6 +36,9 @@ type Settings struct {
 	NgrokAuthToken   string `json:"ngrok_auth_token"`   // Ngrok Authtoken
 	NgrokDomain      string `json:"ngrok_domain"`       // Ngrok Static Domain (e.g. your-name.ngrok-free.app)
 	NgrokEnabled     bool   `json:"ngrok_enabled"`      // Auto-start tunnel on boot
+	DuckDNSToken     string `json:"duckdns_token"`      // DuckDNS Account Token
+	DuckDNSDomain    string `json:"duckdns_domain"`     // DuckDNS Subdomain (e.g. your-name or your-name.duckdns.org)
+	DuckDNSEnabled   bool   `json:"duckdns_enabled"`    // Auto-update DuckDNS on boot
 }
 
 // SMTPSettings is a subset of settings specifically for the AlertService.

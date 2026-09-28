@@ -1,0 +1,108 @@
+name: CI / CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, dev, develop ]
+  pull_request:
+    branches: [ main, master, dev, develop ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend Tests & Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+          cache: true
+
+      - name: Verify Go Module dependencies
+        run: |
+          go mod verify
+          go mod download
+
+      - name: Run Go Vet & Static Analysis
+        run: |
+          go vet ./...
+
+      - name: Install System Build Dependencies (GTK3 & WebKit2)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev
+
+      - name: Run Backend Unit Tests (with Race Detector)
+        run: |
+          go test -v -race ./...
+
+      - name: Verify Binary Compilation (Desktop & Headless)
+        run: |
+          mkdir -p bin
+          go build -tags "production,webkit2_41" -ldflags="-s -w" -o bin/noxfort-monitor ./cmd/server
+          ls -la bin/noxfort-monitor
+
+  frontend-test:
+    name: Frontend Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies
+        run: |
+          npm ci || npm install
+
+      - name: Run Frontend Tests (Vitest)
+        run: |
+          npm test
+
+  security-scan:
+    name: Security & Secret Leak Prevention
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify No Secrets or Credential Files Committed
+        run: |
+          echo "Verifying that no sensitive credentials or .env files are tracked by Git..."
+          FORBIDDEN_FILES=(
+            ".env"
+            ".env.production"
+            "mosquitto/config/passwd"
+            "auth_config.json"
+            "credentials.json"
+          )
+          FAILED=0
+          for file in "${FORBIDDEN_FILES[@]}"; do
+            if git ls-files --error-unmatch "$file" 2>/dev/null; then
+              echo "❌ ERROR: Sensitive file '$file' is tracked in Git history!"
+              FAILED=1
+            fi
+          done
+
+          if [ $FAILED -ne 0 ]; then
+            echo "Security check failed. Remove the sensitive files from git tracking."
+            exit 1
+          fi
+          echo "✅ No sensitive files tracked in Git."

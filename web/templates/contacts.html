@@ -49,16 +49,6 @@
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" id="notify_critical" name="notify_critical">
-                            <label class="form-check-label" for="notify_critical" data-i18n="contact_notify_critical_label">Receive critical alerts only</label>
-                        </div>
-                        <div class="form-text text-muted small" data-i18n="contact_notify_critical_hint">
-                            If disabled, receives all alerts (Warning & Critical).
-                        </div>
-                    </div>
-
                     <button type="submit" class="btn btn-info w-100">
                         <i class="fa-solid fa-plus me-2"></i> <span data-i18n="contact_register_btn">Register Contact</span>
                     </button>
@@ -81,7 +71,6 @@
                                 <th class="ps-4" data-i18n="contact_col_name">Name / Role</th>
                                 <th data-i18n="contact_col_email">Contact Info</th>
                                 <th class="text-center"><i class="fa-brands fa-telegram text-info me-1"></i><span data-i18n="contact_col_telegram">Telegram</span></th>
-                                <th class="text-center" data-i18n="contact_col_notify">Alerts</th>
                                 <th class="text-end pe-4" data-i18n="dev_col_actions">Actions</th>
                             </tr>
                         </thead>
@@ -113,13 +102,6 @@
                                         <span class="text-muted small">—</span>
                                     {{ end }}
                                 </td>
-                                <td class="text-center">
-                                    {{ if .NotifyCritical }}
-                                        <span class="badge bg-danger bg-opacity-25 text-danger border border-danger" data-i18n="contact_alert_critical_only">CRITICAL ONLY</span>
-                                    {{ else }}
-                                        <span class="badge bg-success bg-opacity-25 text-success border border-success" data-i18n="contact_alert_warning_critical">WARNING &amp; CRITICAL</span>
-                                    {{ end }}
-                                </td>
                                 <td class="text-end pe-4 text-nowrap">
                                     <button type="button" class="btn btn-outline-warning btn-sm me-1 btn-edit-contact"
                                             data-id="{{ .ID }}"
@@ -127,8 +109,7 @@
                                             data-role="{{ .Role }}"
                                             data-email="{{ .Email }}"
                                             data-phone="{{ .Phone }}"
-                                            data-telegram="{{ .TelegramChatID }}"
-                                            data-notify-critical="{{ .NotifyCritical }}">
+                                            data-telegram="{{ .TelegramChatID }}">
                                         <i class="fa-solid fa-pen-to-square"></i> <span data-i18n="common_btn_edit">Edit</span>
                                     </button>
                                     <form action="/contacts/delete" method="POST" class="d-inline">
@@ -141,7 +122,7 @@
                             </tr>
                             {{ else }}
                             <tr>
-                                <td colspan="5" class="text-center py-5 text-muted" data-i18n="contact_empty">
+                                <td colspan="4" class="text-center py-5 text-muted" data-i18n="contact_empty">
                                     <i class="fa-solid fa-user-slash fa-2x mb-3 opacity-50"></i><br>
                                     No contacts registered.<br>
                                     Add a team member to receive system alerts.
@@ -204,16 +185,6 @@
                             <span data-i18n="contact_telegram_hint_post">on Telegram.</span>
                         </div>
                     </div>
-
-                    <div class="mb-3">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" id="edit_notify_critical" name="notify_critical">
-                            <label class="form-check-label" for="edit_notify_critical" data-i18n="contact_notify_critical_label">Receive critical alerts only</label>
-                        </div>
-                        <div class="form-text text-muted small" data-i18n="contact_notify_critical_hint">
-                            If disabled, receives all alerts (Warning & Critical).
-                        </div>
-                    </div>
                 </div>
                 <div class="modal-footer border-secondary">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="common_btn_cancel">Cancel</button>
@@ -242,14 +213,12 @@ document.addEventListener("DOMContentLoaded", function () {
             const email = this.getAttribute('data-email');
             const phone = this.getAttribute('data-phone');
             const telegram = this.getAttribute('data-telegram');
-            const notifyCritical = this.getAttribute('data-notify-critical') === 'true';
 
             document.getElementById('edit_id').value = id;
             document.getElementById('edit_name').value = name;
             document.getElementById('edit_email').value = email;
             document.getElementById('edit_phone').value = phone || '';
             document.getElementById('edit_telegram').value = telegram || '';
-            document.getElementById('edit_notify_critical').checked = notifyCritical;
 
             // Match role
             const roleSelect = document.getElementById('edit_role');

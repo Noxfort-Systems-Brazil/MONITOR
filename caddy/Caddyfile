@@ -1,0 +1,26 @@
+# Noxfort Monitor™ - Caddy Reverse Proxy Configuration
+# Copyright (C) 2026 Gabriel Moraes - Noxfort Systems
+
+{
+	# Email can be optionally provided via environment variable
+}
+
+# Subdomain configuration via DuckDNS
+{$DUCKDNS_DOMAIN}.duckdns.org {
+	# Automatic TLS using Let's Encrypt / ZeroSSL with DuckDNS DNS-01 Challenge
+	tls {
+		dns duckdns {$DUCKDNS_TOKEN}
+	}
+
+	# Secure WebSocket endpoint for Mosquitto MQTT (WSS)
+	@mqtt_ws {
+		path /mqtt
+	}
+	reverse_proxy @mqtt_ws host.docker.internal:9001
+
+	# Ingestion Telemetry API and Web UI (Forwarded to Noxfort Monitor Core on host)
+	reverse_proxy host.docker.internal:22100 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+}

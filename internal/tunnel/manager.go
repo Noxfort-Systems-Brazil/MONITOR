@@ -54,7 +54,7 @@ func NewManager(driver Driver, localPort string) *Manager {
 		driver = NewNgrokDriver()
 	}
 	if localPort == "" {
-		localPort = "8080"
+		localPort = "22100"
 	}
 	return &Manager{
 		driver:    driver,
@@ -234,6 +234,11 @@ func (m *Manager) Stop() error {
 	return m.driver.Stop()
 }
 
+// IPv6Reporter is an optional interface implemented by drivers supporting IPv6 discovery.
+type IPv6Reporter interface {
+	GetIPv6Address() string
+}
+
 // GetStatus returns a snapshot of the current tunnel state.
 func (m *Manager) GetStatus() Status {
 	m.mu.RLock()
@@ -249,13 +254,38 @@ func (m *Manager) GetStatus() Status {
 		started = m.startedAt.Format("15:04:05 02/01/2006")
 	}
 
+	ipv6 := ""
+	if rep, ok := m.driver.(IPv6Reporter); ok {
+		ipv6 = rep.GetIPv6Address()
+	}
+
+	useHTTPS := strings.HasPrefix(m.publicURL, "https://")
+	if !useHTTPS {
+		if rep, ok := m.driver.(interface{ IsHTTPS() bool }); ok {
+			useHTTPS = rep.IsHTTPS()
+		}
+	}
+
 	return Status{
 		State:        m.state,
+		Provider:     m.driver.Name(),
 		PublicURL:    m.publicURL,
 		TelemetryURL: telemetryURL,
 		Domain:       m.domain,
 		BinaryFound:  m.driver.IsAvailable(),
+		IPv6Address:  ipv6,
+		LocalPort:    m.localPort,
+		UseHTTPS:     useHTTPS,
 		ErrorMessage: m.errorMessage,
 		StartedAt:    started,
 	}
+}
+
+// TestConnection validates the tunnel credentials and connectivity via the underlying driver.
+func (m *Manager) TestConnection(ctx context.Context, token, domain string) (*TestResult, error) {
+	tester, ok := m.driver.(Tester)
+	if !ok {
+		return nil, fmt.Errorf("o provedor '%s' não suporta testes ativos de conectividade", m.driver.Name())
+	}
+	return tester.Test(ctx, token, domain)
 }

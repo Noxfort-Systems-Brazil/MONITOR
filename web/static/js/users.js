@@ -185,6 +185,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const data = await res.json();
                 if (res.ok && data.success) {
+                    if (data.self_deleted) {
+                        alert(`Sua conta "${username}" foi excluída. Você será redirecionado para a tela de login.`);
+                        window.location.href = '/login';
+                        return;
+                    }
                     showActionAlert(`✅ Usuário "${username}" removido.`, 'success');
                     const row = document.getElementById(`user-row-${username}`);
                     if (row) row.remove();

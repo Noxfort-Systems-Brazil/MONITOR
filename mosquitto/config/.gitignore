@@ -1,0 +1,4 @@
+# Ignore Mosquitto credential files
+passwd
+passwd*
+*.key

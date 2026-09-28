@@ -21,6 +21,7 @@
 package desktop
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,8 +30,20 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
+
+// ErrAlreadyRunning indicates that another instance of Noxfort Monitor holds the system lock.
+var ErrAlreadyRunning = errors.New("uma instância do Noxfort Monitor já está em execução")
+
+func getLockFilePath() string {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir != "" {
+		return filepath.Join(runtimeDir, "noxfort-monitor.lock")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("noxfort-monitor-%d.lock", os.Getuid()))
+}
 
 func getSocketPath() string {
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
@@ -55,14 +68,15 @@ func TryActivateExisting() bool {
 	return true
 }
 
-type singleInstanceServer struct {
+type singleInstanceLock struct {
+	lockFile *os.File
 	listener net.Listener
 	sockPath string
 	closeMu  sync.Mutex
 	closed   bool
 }
 
-func (s *singleInstanceServer) Close() error {
+func (s *singleInstanceLock) Close() error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
 
@@ -71,24 +85,56 @@ func (s *singleInstanceServer) Close() error {
 	}
 	s.closed = true
 
-	err := s.listener.Close()
+	var firstErr error
+	if s.listener != nil {
+		if err := s.listener.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 	_ = os.Remove(s.sockPath)
-	return err
+
+	if s.lockFile != nil {
+		_ = syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN)
+		if err := s.lockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
 }
 
-// StartSingleInstanceServer starts listening for activation commands from subsequent invocations.
-func StartSingleInstanceServer(onActivate func()) (io.Closer, error) {
-	sockPath := getSocketPath()
+// AcquireLockOrActivate guarantees that only a single instance of Noxfort Monitor runs on the host.
+// It acquires an atomic kernel-level file lock (flock). If an instance is already active, it triggers
+// window restoration via IPC and returns ErrAlreadyRunning.
+func AcquireLockOrActivate(onActivate func()) (io.Closer, error) {
+	lockPath := getLockFilePath()
 
-	// Clean up stale socket file if not responding
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open lock file: %w", err)
+	}
+
+	// Try acquiring an exclusive, non-blocking lock
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lockFile.Close()
+		// Lock is held by another running process -> activate its window and signal ErrAlreadyRunning
+		_ = TryActivateExisting()
+		return nil, ErrAlreadyRunning
+	}
+
+	// Lock acquired: we are the primary active instance. Now start IPC activation server.
+	sockPath := getSocketPath()
 	_ = os.Remove(sockPath)
 
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = lockFile.Close()
 		return nil, fmt.Errorf("failed to listen on single instance socket: %w", err)
 	}
 
-	server := &singleInstanceServer{
+	instanceLock := &singleInstanceLock{
+		lockFile: lockFile,
 		listener: listener,
 		sockPath: sockPath,
 	}
@@ -115,5 +161,11 @@ func StartSingleInstanceServer(onActivate func()) (io.Closer, error) {
 		}
 	}()
 
-	return server, nil
+	return instanceLock, nil
+}
+
+// StartSingleInstanceServer starts listening for activation commands from subsequent invocations.
+// Deprecated: prefer AcquireLockOrActivate for atomic kernel-level flock safety.
+func StartSingleInstanceServer(onActivate func()) (io.Closer, error) {
+	return AcquireLockOrActivate(onActivate)
 }

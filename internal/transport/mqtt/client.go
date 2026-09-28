@@ -23,6 +23,8 @@ package mqtt
 import (
 	"fmt"
 	"log"
+	"net/url"
+	"os"
 	"time"
 
 	"noxfort-monitor-server/internal/monitor"
@@ -39,14 +41,43 @@ type Client struct {
 	topicPattern   string
 }
 
-// NewClient creates a configured MQTT client instance.
-// It subscribes to a wildcard topic to catch all system events.
+// NewClient creates a configured MQTT client instance using environment variables
+// (MQTT_USER / MQTT_PASSWORD) or URL credentials if available.
 func NewClient(brokerURL string, sm monitor.EventProcessor) *Client {
+	username := os.Getenv("MQTT_USER")
+	password := os.Getenv("MQTT_PASSWORD")
+	return NewClientWithCredentials(brokerURL, username, password, sm)
+}
+
+// NewClientWithCredentials creates a configured MQTT client with explicit credentials.
+func NewClientWithCredentials(brokerURL string, username, password string, sm monitor.EventProcessor) *Client {
+	cleanBrokerURL := brokerURL
+	// Parse credentials embedded in URL if parameters are empty
+	if parsedURL, err := url.Parse(brokerURL); err == nil {
+		if username == "" && parsedURL.User != nil {
+			username = parsedURL.User.Username()
+			if p, ok := parsedURL.User.Password(); ok {
+				password = p
+			}
+			// Strip user info from the broker URL for Paho
+			parsedURL.User = nil
+			cleanBrokerURL = parsedURL.String()
+		}
+	}
+
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker(brokerURL)
+	opts.AddBroker(cleanBrokerURL)
 	opts.SetClientID("noxfort-monitor-server")
 	opts.SetKeepAlive(60 * time.Second)
 	opts.SetAutoReconnect(true)
+
+	if username != "" {
+		opts.SetUsername(username)
+		if password != "" {
+			opts.SetPassword(password)
+		}
+	}
+
 	opts.SetConnectionLostHandler(func(c mqtt.Client, err error) {
 		log.Printf("[MQTT] Connection lost: %v", err)
 	})
@@ -99,4 +130,12 @@ func (c *Client) handleMessage(client mqtt.Client, msg mqtt.Message) {
 func (c *Client) Disconnect() {
 	c.internalClient.Disconnect(250)
 	log.Println("[MQTT] Disconnected.")
+}
+
+// IsConnected returns whether the internal MQTT client is currently connected.
+func (c *Client) IsConnected() bool {
+	if c == nil || c.internalClient == nil {
+		return false
+	}
+	return c.internalClient.IsConnected()
 }

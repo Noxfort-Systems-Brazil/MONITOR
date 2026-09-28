@@ -113,6 +113,16 @@ func (h *SettingsHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
 
 	settings := parseSettingsForm(r)
 
+	// Preserve existing DuckDNS and remote access configurations so saving general settings does not wipe them
+	if existing, err := h.repo.GetSettings(); err == nil && existing != nil {
+		settings.DuckDNSToken = existing.DuckDNSToken
+		settings.DuckDNSDomain = existing.DuckDNSDomain
+		settings.DuckDNSEnabled = existing.DuckDNSEnabled
+		settings.NgrokAuthToken = existing.NgrokAuthToken
+		settings.NgrokDomain = existing.NgrokDomain
+		settings.NgrokEnabled = existing.NgrokEnabled
+	}
+
 	// Persist to database
 	if err := h.repo.SaveSettings(settings); err != nil {
 		log.Printf("[SETTINGS] Failed to save: %v", err)

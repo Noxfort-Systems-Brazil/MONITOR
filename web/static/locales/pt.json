@@ -23,7 +23,7 @@
   "dash_no_events": "Nenhum incidente recente registrado.",
   "dev_title": "Sistemas Monitorados",
   "dev_add_btn": "Registrar Sistema",
-  "dev_server_host_label": "Endereço de Telemetria (Ngrok)",
+  "dev_server_host_label": "Endereço de Telemetria (DuckDNS)",
   "dev_server_host_hint": "Cole este endereço na configuração do Synapse, Carina ou programas externos.",
   "dev_copy_ip": "Copiar Endereço",
   "dev_copied": "Copiado!",

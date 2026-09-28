@@ -86,31 +86,35 @@ func MigrateData(sourceDB *sql.DB, sourceDriver string, targetDB *sql.DB, target
 
 	// 4. Migrate Settings (copy active settings if target is still default)
 	var s struct {
-		smtpHost, smtpUser, smtpPass, smtpFrom, adminEmail, mqtt, tg, ngTok, ngDom string
-		smtpPort                                                                    int
-		enabled, ngEn                                                               bool
+		smtpHost, smtpUser, smtpPass, smtpFrom, adminEmail, mqtt, tg, ngTok, ngDom, duckTok, duckDom string
+		smtpPort                                                                                       int
+		enabled, ngEn, duckEn                                                                          bool
 	}
 	settingsRow := sourceDB.QueryRow(`
 		SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, admin_email,
 		       mqtt_address, enabled, telegram_bot_token,
-		       COALESCE(ngrok_auth_token, ''), COALESCE(ngrok_domain, ''), COALESCE(ngrok_enabled, 0)
+		       COALESCE(ngrok_auth_token, ''), COALESCE(ngrok_domain, ''), COALESCE(ngrok_enabled, 0),
+		       COALESCE(duckdns_token, ''), COALESCE(duckdns_domain, ''), COALESCE(duckdns_enabled, 0)
 		FROM settings WHERE id = 1
 	`)
 	if err := settingsRow.Scan(
 		&s.smtpHost, &s.smtpPort, &s.smtpUser, &s.smtpPass, &s.smtpFrom, &s.adminEmail,
 		&s.mqtt, &s.enabled, &s.tg, &s.ngTok, &s.ngDom, &s.ngEn,
+		&s.duckTok, &s.duckDom, &s.duckEn,
 	); err == nil {
 		updateSettingsQuery := AdaptQuery(`
 			UPDATE settings SET
 				smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_pass = ?,
 				smtp_from = ?, admin_email = ?, mqtt_address = ?, enabled = ?,
-				telegram_bot_token = ?, ngrok_auth_token = ?, ngrok_domain = ?, ngrok_enabled = ?
+				telegram_bot_token = ?, ngrok_auth_token = ?, ngrok_domain = ?, ngrok_enabled = ?,
+				duckdns_token = ?, duckdns_domain = ?, duckdns_enabled = ?
 			WHERE id = 1;
 		`, targetDriver)
 		_, _ = targetDB.Exec(updateSettingsQuery,
 			s.smtpHost, s.smtpPort, s.smtpUser, s.smtpPass,
 			s.smtpFrom, s.adminEmail, s.mqtt, s.enabled,
 			s.tg, s.ngTok, s.ngDom, s.ngEn,
+			s.duckTok, s.duckDom, s.duckEn,
 		)
 	}
 

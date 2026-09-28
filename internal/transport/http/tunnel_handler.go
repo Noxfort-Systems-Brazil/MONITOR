@@ -17,7 +17,7 @@
 // File: internal/transport/http/tunnel_handler.go
 // Author: Gabriel Moraes
 // Date: 2026-09-04
-// Modified: 2026-09-04 (SOLID: Depends on tunnel.Service interface)
+// Modified: 2026-09-14 (SOLID Refactor: Interface Segregation, DRY & Lean Transport)
 
 package http
 
@@ -26,28 +26,29 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 	"noxfort-monitor-server/internal/tunnel"
 )
 
-// TunnelHandler manages the Remote Access (Ngrok Tunnel) page and API endpoints.
-// Adheres to Dependency Inversion Principle (DIP) by depending on the tunnel.Service abstraction.
+// SettingsStore defines the segregated persistence contract needed by TunnelHandler (ISP).
+type SettingsStore interface {
+	GetSettings() (*domain.Settings, error)
+	SaveSettings(s *domain.Settings) error
+}
+
+// TunnelHandler manages the Remote Access (DuckDNS Tunnel) page and API endpoints.
 type TunnelHandler struct {
-	settingsRepo  domain.SettingsRepository
+	settingsRepo  SettingsStore
 	tunnelService tunnel.Service
 }
 
-// NewTunnelHandler creates a new TunnelHandler instance with an injected tunnel service.
-func NewTunnelHandler(settingsRepo domain.SettingsRepository, ts tunnel.Service) *TunnelHandler {
-	if ts == nil {
-		ts = tunnel.NewManager(nil, "8080")
-	}
-	return &TunnelHandler{
-		settingsRepo:  settingsRepo,
-		tunnelService: ts,
-	}
+// NewTunnelHandler creates a new TunnelHandler instance with injected dependencies (DIP).
+func NewTunnelHandler(settingsRepo SettingsStore, ts tunnel.Service) *TunnelHandler {
+	return &TunnelHandler{settingsRepo: settingsRepo, tunnelService: ts}
 }
 
 // ServePage renders the dedicated Remote Access HTML page.
@@ -60,16 +61,11 @@ func (h *TunnelHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := h.tunnelService.GetStatus()
-	localIP := GetLocalIP()
-
-	data := map[string]interface{}{
-		"Title":       "Remote Access",
-		"Settings":    settings,
-		"Status":      status,
-		"LocalIP":     localIP,
-		"LocalPort":   "8080",
-		"LocalURL":    "http://" + localIP + ":8080/api/telemetry",
-		"BinaryFound": h.tunnelService.IsBinaryAvailable(),
+	localIP, localPort := GetLocalIP(), status.LocalPort
+	if localPort == "" {
+		if localPort = os.Getenv("PORT"); localPort == "" {
+			localPort = "22100"
+		}
 	}
 
 	tmpl, err := template.ParseFiles(
@@ -82,119 +78,199 @@ func (h *TunnelHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("[REMOTE] Template execution error: %v", err)
-	}
+	_ = tmpl.Execute(w, map[string]interface{}{
+		"Title":       "Remote Access",
+		"Settings":    settings,
+		"Status":      status,
+		"LocalIP":     localIP,
+		"LocalPort":   localPort,
+		"LocalURL":    "http://" + localIP + ":" + localPort + "/api/telemetry",
+		"BinaryFound": h.tunnelService.IsBinaryAvailable(),
+	})
 }
 
 // HandleStatus returns the current live status of the tunnel as JSON.
 func (h *TunnelHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	status := h.tunnelService.GetStatus()
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(status)
+	h.respondJSON(w, http.StatusOK, h.tunnelService.GetStatus())
 }
 
-// HandleSave updates the tunnel credentials in the database and restarts the tunnel if enabled.
+// HandleSave updates the tunnel credentials in the database without auto-connecting unless explicitly requested.
 func (h *TunnelHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !h.isPost(w, r) {
 		return
 	}
-
-	if err := r.ParseForm(); err != nil {
+	_ = r.ParseMultipartForm(32 << 20)
+	if err := r.ParseForm(); err != nil && r.MultipartForm == nil {
 		http.Error(w, "Invalid Form Data", http.StatusBadRequest)
 		return
 	}
 
-	token := tunnel.CleanAuthToken(r.FormValue("ngrok_auth_token"))
-	domainName := tunnel.CleanDomain(r.FormValue("ngrok_domain"))
-	autoStart := (token != "")
+	token := tunnel.CleanDuckDNSToken(r.FormValue("duckdns_token"))
+	domainName := tunnel.CleanDuckDNSDomain(r.FormValue("duckdns_domain"))
+	autoStart := r.FormValue("duckdns_enabled") == "on" || r.FormValue("duckdns_enabled") == "true" || r.FormValue("auto_start") == "true"
 
-	settings, err := h.settingsRepo.GetSettings()
+	err := h.mutateSettings(func(s *domain.Settings) {
+		s.DuckDNSToken, s.DuckDNSDomain = token, domainName
+		if autoStart {
+			s.DuckDNSEnabled = true
+		} else if token == "" || domainName == "" {
+			s.DuckDNSEnabled = false
+		}
+		s.NgrokAuthToken, s.NgrokDomain, s.NgrokEnabled = "", "", false
+	})
 	if err != nil {
-		http.Error(w, "Failed to fetch settings", http.StatusInternalServerError)
-		return
-	}
-
-	// Update ngrok specific fields - autoStart is always true when token is configured
-	settings.NgrokAuthToken = token
-	settings.NgrokDomain = domainName
-	settings.NgrokEnabled = autoStart
-
-	if err := h.settingsRepo.SaveSettings(settings); err != nil {
-		log.Printf("[REMOTE] Failed to save settings: %v", err)
 		http.Error(w, "Failed to save settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// If token present, start/restart tunnel automatically
-	if token != "" {
-		if err := h.tunnelService.Start(token, domainName); err != nil {
-			log.Printf("[REMOTE] Failed to start tunnel after save: %v", err)
-		}
-	} else {
+	if autoStart && token != "" {
+		_ = h.tunnelService.Start(token, domainName)
+	} else if token == "" {
 		_ = h.tunnelService.Stop()
 	}
 
-	// Support AJAX / JSON response
-	if r.Header.Get("Accept") == "application/json" || r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"message": "Configurações salvas com sucesso. Túnel em inicialização.",
-		})
+	if strings.Contains(r.Header.Get("Accept"), "json") || r.Header.Get("X-Requested-With") != "" {
+		h.respondResult(w, http.StatusOK, true, "Configurações salvas com sucesso.")
 		return
 	}
-
 	http.Redirect(w, r, "/remote?success=1", http.StatusSeeOther)
 }
 
-// HandleStart triggers tunnel startup on demand.
+// HandleStart triggers tunnel startup on demand and marks it enabled in settings.
 func (h *TunnelHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !h.isPost(w, r) {
+		return
+	}
+	_ = r.ParseMultipartForm(32 << 20)
+	_ = r.ParseForm()
+
+	token := tunnel.CleanDuckDNSToken(r.FormValue("duckdns_token"))
+	domainName := tunnel.CleanDuckDNSDomain(r.FormValue("duckdns_domain"))
+
+	if token == "" || domainName == "" {
+		if settings, _ := h.settingsRepo.GetSettings(); settings != nil {
+			if token == "" {
+				token = settings.DuckDNSToken
+			}
+			if domainName == "" {
+				domainName = settings.DuckDNSDomain
+			}
+		}
+	}
+
+	if token == "" || domainName == "" {
+		h.respondResult(w, http.StatusBadRequest, false, "Token não configurado. Por favor, configure seu token DuckDNS primeiro.")
 		return
 	}
 
-	settings, err := h.settingsRepo.GetSettings()
-	if err != nil || settings.NgrokAuthToken == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   "Authtoken não configurado. Por favor, configure seu token primeiro.",
-		})
-		return
-	}
-
-	if err := h.tunnelService.Start(settings.NgrokAuthToken, settings.NgrokDomain); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Túnel iniciado com sucesso.",
+	// Always persist credentials immediately so they are never lost even if start fails
+	_ = h.mutateSettings(func(s *domain.Settings) {
+		s.DuckDNSToken = token
+		s.DuckDNSDomain = domainName
 	})
+
+	if err := h.tunnelService.Start(token, domainName); err != nil {
+		h.respondResult(w, http.StatusInternalServerError, false, err.Error())
+		return
+	}
+
+	_ = h.mutateSettings(func(s *domain.Settings) {
+		s.DuckDNSToken = token
+		s.DuckDNSDomain = domainName
+		s.DuckDNSEnabled = true
+	})
+	h.respondResult(w, http.StatusOK, true, "Serviço DuckDNS iniciado com sucesso.")
 }
 
-// HandleStop stops the tunnel on demand.
+// HandleStop stops the tunnel on demand and disables auto-start on boot.
 func (h *TunnelHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !h.isPost(w, r) {
+		return
+	}
+	_ = h.tunnelService.Stop()
+	_ = h.mutateSettings(func(s *domain.Settings) { s.DuckDNSEnabled = false })
+	h.respondResult(w, http.StatusOK, true, "Serviço DuckDNS desconectado/pausado com sucesso.")
+}
+
+// HandleDisconnect completely unlinks DuckDNS credentials and terminates the connection.
+func (h *TunnelHandler) HandleDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !h.isPost(w, r) {
+		return
+	}
+	_ = h.tunnelService.Stop()
+	if err := h.mutateSettings(func(s *domain.Settings) {
+		s.DuckDNSToken, s.DuckDNSDomain, s.DuckDNSEnabled = "", "", false
+	}); err != nil {
+		h.respondResult(w, http.StatusInternalServerError, false, "Falha ao remover credenciais: "+err.Error())
+		return
+	}
+	h.respondResult(w, http.StatusOK, true, "Credenciais do DuckDNS removidas e serviço desconectado com sucesso.")
+}
+
+// HandleTest verifies tunnel credentials and connectivity via the injected service.
+func (h *TunnelHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
+	if !h.isPost(w, r) {
+		return
+	}
+	_ = r.ParseMultipartForm(32 << 20)
+	_ = r.ParseForm()
+	token := tunnel.CleanDuckDNSToken(r.FormValue("duckdns_token"))
+	domainName := tunnel.CleanDuckDNSDomain(r.FormValue("duckdns_domain"))
+	if (token == "" || domainName == "") && h.settingsRepo != nil {
+		if s, _ := h.settingsRepo.GetSettings(); s != nil {
+			if token == "" {
+				token = s.DuckDNSToken
+			}
+			if domainName == "" {
+				domainName = s.DuckDNSDomain
+			}
+		}
+	}
+
+	if token == "" || domainName == "" {
+		h.respondResult(w, http.StatusBadRequest, false, "Token e Subdomínio são obrigatórios para testar a conexão.")
 		return
 	}
 
-	_ = h.tunnelService.Stop()
+	result, err := h.tunnelService.TestConnection(r.Context(), token, domainName)
+	if err != nil {
+		h.respondResult(w, http.StatusBadRequest, false, err.Error())
+		return
+	}
+	h.respondJSON(w, http.StatusOK, result)
+}
+
+// ─── Helpers (DRY) ───
+
+func (h *TunnelHandler) mutateSettings(fn func(*domain.Settings)) error {
+	settings, err := h.settingsRepo.GetSettings()
+	if err != nil || settings == nil {
+		return err
+	}
+	fn(settings)
+	return h.settingsRepo.SaveSettings(settings)
+}
+
+func (h *TunnelHandler) isPost(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	return true
+}
+
+func (h *TunnelHandler) respondJSON(w http.ResponseWriter, code int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Túnel finalizado com sucesso.",
-	})
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func (h *TunnelHandler) respondResult(w http.ResponseWriter, code int, ok bool, msg string) {
+	payload := map[string]interface{}{"success": ok}
+	if ok {
+		payload["message"] = msg
+	} else {
+		payload["error"] = msg
+	}
+	h.respondJSON(w, code, payload)
 }

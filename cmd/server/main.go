@@ -23,6 +23,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -50,37 +52,31 @@ func main() {
 	flag.BoolVar(headless, "server-only", false, "Alias for --headless")
 	flag.Parse()
 
-	// 0. Single Instance Lock (Enforce only one monitor open at a time)
-	if !*headless {
-		if desktop.TryActivateExisting() {
-			log.Println("[BOOT] Uma instância do Noxfort Monitor já está em execução. Janela existente trazida para o primeiro plano.")
-			os.Exit(0)
-		}
-	}
-
-	// 1. Initialize Logger
-	log.Println("[BOOT] Starting Noxfort Monitor v2.0 (Event-Driven)...")
-
-	// 1.1 Single Instance IPC Server
+	// 0. Single Instance Lock (Atomic OS flock + IPC window activation)
 	var singleInstanceServer io.Closer
 	var appRef *desktop.App
 	var appRefMu sync.Mutex
 
-	if !*headless {
-		srv, err := desktop.StartSingleInstanceServer(func() {
-			appRefMu.Lock()
-			app := appRef
-			appRefMu.Unlock()
-			if app != nil {
-				app.RestoreWindow()
-			}
-		})
-		if err == nil {
-			singleInstanceServer = srv
-		} else {
-			log.Printf("[WARN] Single instance socket listener could not be started: %v", err)
+	lock, err := desktop.AcquireLockOrActivate(func() {
+		appRefMu.Lock()
+		app := appRef
+		appRefMu.Unlock()
+		if app != nil {
+			app.RestoreWindow()
 		}
+	})
+	if errors.Is(err, desktop.ErrAlreadyRunning) {
+		log.Println("[BOOT] Uma instância do Noxfort Monitor já está em execução. Janela existente trazida para o primeiro plano.")
+		os.Exit(0)
+	} else if err != nil {
+		log.Printf("[WARN] Aviso ao verificar instância única: %v", err)
+	} else {
+		singleInstanceServer = lock
 	}
+
+	// 1. Initialize Logger & Audit Environment Security
+	log.Println("[BOOT] Starting Noxfort Monitor v2.0 (Event-Driven)...")
+	security.ValidateEnvironmentSecurity(".env")
 
 	// 2. Database Connection (PostgreSQL with auto-schema or SQLite fallback)
 	homedir, err := os.UserHomeDir()
@@ -187,20 +183,28 @@ func main() {
 	}
 	log.Println("[INFO] MQTT Listener Active (Listening for JSON events).")
 
-	// 6. Initialize HTTP Server & Tunnel Manager (Ngrok)
+	// 6. Initialize HTTP Server & Remote Access Manager (DuckDNS)
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "22100"
 	}
 
-	tunnelDriver := tunnel.NewNgrokDriver()
+	tunnelDriver := tunnel.NewDuckDNSDriver()
 	tunnelManager := tunnel.NewManager(tunnelDriver, port)
-	if settings.NgrokAuthToken != "" {
-		log.Printf("[BOOT] Auto-starting Ngrok Tunnel on domain '%s'...", settings.NgrokDomain)
-		if err := tunnelManager.Start(settings.NgrokAuthToken, settings.NgrokDomain); err != nil {
-			log.Printf("[WARN] Failed to auto-start Ngrok tunnel on boot: %v", err)
+
+	activeToken := settings.DuckDNSToken
+	activeDomain := settings.DuckDNSDomain
+	activeEnabled := settings.DuckDNSEnabled
+
+	if activeToken != "" && activeDomain != "" && activeEnabled && !strings.Contains(activeDomain, "ngrok") {
+		log.Printf("[BOOT] Auto-starting DuckDNS updater on domain '%s'...", activeDomain)
+		if err := tunnelManager.Start(activeToken, activeDomain); err != nil {
+			log.Printf("[WARN] Failed to auto-start DuckDNS updater on boot: %v", err)
 		}
 	}
+
+	backupDir := filepath.Join(dataDir, "backups")
+	backupManager := storage.NewBackupManager(dbManager, backupDir, 7)
 
 	httpServer := transportHttp.NewServer(
 		":"+port,
@@ -215,14 +219,16 @@ func main() {
 		dbManager,
 		auditRepo,
 	)
+	httpServer.SetMQTTStatus(mqttClient)
+	httpServer.SetBackupService(backupManager)
 
 	localIP := transportHttp.GetLocalIP()
 	serverURL := fmt.Sprintf("http://%s:%s", localIP, port)
 
 	// Run HTTP server in background for external IoT ingestion (/api/telemetry)
-	// and Wails native webview
+	// Run HTTP server in background for external IoT ingestion (/api/telemetry)
 	go func() {
-		log.Printf("[INFO] Local REST & Telemetry Server running at %s (Local: http://localhost:%s)", serverURL, port)
+		log.Printf("[INFO] Ingestion Telemetry Server running at %s (External endpoint: POST /api/telemetry | Browser UI access disabled)", serverURL)
 		if err := httpServer.Run(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[FATAL] Web Server failed: %v", err)
 		}
@@ -264,7 +270,7 @@ func main() {
 		os.Exit(0)
 	} else {
 		log.Println("[BOOT] Starting Noxfort Monitor Desktop GUI (Wails v2)...")
-		desktopApp := desktop.New(httpServer.Handler(), shutdown)
+		desktopApp := desktop.New(httpServer.DesktopHandler(), shutdown)
 		appRefMu.Lock()
 		appRef = desktopApp
 		appRefMu.Unlock()

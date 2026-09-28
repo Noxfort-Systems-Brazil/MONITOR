@@ -107,7 +107,7 @@ func (d *NgrokDriver) Start(ctx context.Context, cfg Config) error {
 	}
 	port := cfg.LocalPort
 	if port == "" {
-		port = "8080"
+		port = "22100"
 	}
 	args = append(args, port)
 

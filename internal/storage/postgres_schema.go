@@ -87,11 +87,19 @@ func InitPostgresSchema(db *sql.DB, schemaName string) error {
 			ngrok_auth_token TEXT DEFAULT '',
 			ngrok_domain TEXT DEFAULT '',
 			ngrok_enabled BOOLEAN DEFAULT FALSE,
+			duckdns_token TEXT DEFAULT '',
+			duckdns_domain TEXT DEFAULT '',
+			duckdns_enabled BOOLEAN DEFAULT FALSE,
 			enabled BOOLEAN DEFAULT FALSE
 		);`,
 
 		// Ensure default settings row
 		`INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;`,
+
+		// DuckDNS Migrations (Idempotent)
+		`ALTER TABLE settings ADD COLUMN IF NOT EXISTS duckdns_token TEXT DEFAULT '';`,
+		`ALTER TABLE settings ADD COLUMN IF NOT EXISTS duckdns_domain TEXT DEFAULT '';`,
+		`ALTER TABLE settings ADD COLUMN IF NOT EXISTS duckdns_enabled BOOLEAN DEFAULT FALSE;`,
 
 		// Telemetry / Incidents
 		`CREATE TABLE IF NOT EXISTS telemetry (

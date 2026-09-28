@@ -99,7 +99,7 @@
                     </li>
 
                     <li class="nav-item border-start border-secondary ps-2">
-                        <a class="btn btn-outline-danger btn-sm d-flex align-items-center px-2 py-1" href="/api/auth/logout" title="Sair do Monitor" style="font-size: 0.82rem;">
+                        <a class="btn btn-outline-danger btn-sm d-flex align-items-center px-2 py-1" href="/api/auth/logout" onclick="try{localStorage.removeItem('noxfort_session');}catch(e){}" title="Sair do Monitor" style="font-size: 0.82rem;">
                             <i class="fa-solid fa-arrow-right-from-bracket me-1"></i>
                             <span data-i18n="sidebar_logout">Sair</span>
                         </a>

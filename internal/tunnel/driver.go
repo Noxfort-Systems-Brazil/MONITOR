@@ -35,10 +35,14 @@ const (
 // Status represents the public telemetry access view data.
 type Status struct {
 	State        State  `json:"state"`
+	Provider     string `json:"provider,omitempty"`
 	PublicURL    string `json:"public_url"`
 	TelemetryURL string `json:"telemetry_url"`
 	Domain       string `json:"domain"`
 	BinaryFound  bool   `json:"binary_found"`
+	IPv6Address  string `json:"ipv6_address,omitempty"`
+	LocalPort    string `json:"local_port,omitempty"`
+	UseHTTPS     bool   `json:"use_https,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
 	StartedAt    string `json:"started_at,omitempty"`
 }
@@ -48,6 +52,7 @@ type Config struct {
 	AuthToken string
 	Domain    string
 	LocalPort string
+	UseHTTPS  bool
 }
 
 // Driver abstracts low-level reverse tunnel providers (e.g., Ngrok, Cloudflare, Localtunnel).
@@ -72,6 +77,20 @@ type Driver interface {
 	Wait() error
 }
 
+// TestResult encapsulates diagnostic feedback from active connection validation.
+type TestResult struct {
+	Success     bool     `json:"success"`
+	Message     string   `json:"message"`
+	Domain      string   `json:"domain,omitempty"`
+	ResolvedIPs []string `json:"resolved_ips,omitempty"`
+	IPv6Active  bool     `json:"ipv6_active,omitempty"`
+}
+
+// Tester is an optional interface implemented by drivers supporting active credential and connectivity testing.
+type Tester interface {
+	Test(ctx context.Context, token, domain string) (*TestResult, error)
+}
+
 // Service defines the high-level contract consumed by HTTP Handlers.
 // Adheres to Interface Segregation Principle (ISP) and Dependency Inversion Principle (DIP).
 type Service interface {
@@ -79,4 +98,5 @@ type Service interface {
 	Stop() error
 	GetStatus() Status
 	IsBinaryAvailable() bool
+	TestConnection(ctx context.Context, token, domain string) (*TestResult, error)
 }

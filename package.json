@@ -1,0 +1,15 @@
+{
+  "name": "noxfort-monitor-frontend",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Frontend test suite and quality tooling for Noxfort Monitor",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "happy-dom": "^14.12.3",
+    "vitest": "^1.6.0"
+  }
+}

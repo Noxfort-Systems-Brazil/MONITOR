@@ -42,6 +42,9 @@ func DefaultDatabaseConfig() domain.DatabaseConfig {
 
 // GetDBConfigFilepath returns the path to the database configuration JSON file.
 func GetDBConfigFilepath() string {
+	if p := os.Getenv("MONITOR_DB_CONFIG_PATH"); p != "" {
+		return p
+	}
 	homedir, err := os.UserHomeDir()
 	if err != nil {
 		return "database_config.json"

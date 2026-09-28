@@ -83,37 +83,103 @@ To streamline initial deployments without compromising security, the system exec
 
 ---
 
-## 5. HTTP Protection Middleware (`AuthMiddleware`)
+## 5. Network Segregation & Protection Middleware
 
-[`AuthMiddleware`](../internal/transport/http/middleware.go) wraps the server routing tree and intercepts all incoming requests:
+To maximize security and eliminate attack surfaces on external networks, Noxfort Monitor implements a strict **two-tier handler architecture**:
 
-```go
-func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler
+```mermaid
+graph TD
+    Client[Incoming Request]
+    
+    subgraph "External Network Port :22100 (Server.Run)"
+        Ext[ExternalIngestionHandler]
+        TelCheck{Is POST /api/telemetry?}
+        AllowTel[200 OK - Forward to StateManager]
+        DenyExt[403 Forbidden - Browser Blocked]
+    end
+
+    subgraph "Native Desktop Container (Wails v2)"
+        DesktopMux[DesktopHandler]
+        AuthMW[AuthMiddleware]
+        RBAC{Session & RBAC Validation}
+        AllowInternal[Render Authorized GUI View]
+        RedirectLogin[303 Redirect to /login]
+    end
+
+    Client -->|External Network Traffic| Ext
+    Ext --> TelCheck
+    TelCheck -->|Yes| AllowTel
+    TelCheck -->|No / Browser Request| DenyExt
+
+    Client -->|Native Window Webview| DesktopMux
+    DesktopMux --> AuthMW
+    AuthMW --> RBAC
+    RBAC -->|Valid Session & Role| AllowInternal
+    RBAC -->|Unauthenticated Page| RedirectLogin
 ```
 
-### Interception Rules:
+### 5.1 External Port Ingestion Handler (`ExternalIngestionHandler`)
+Configured on the network listening socket in [`internal/transport/http/server.go`](../internal/transport/http/server.go):
+1. **Public IoT Endpoint**: Strictly permits `POST /api/telemetry` without credentials to facilitate unhindered ingestion from autonomous edge nodes (Carina, Synapse, 4G sensors).
+2. **Browser UI Blocking**: Any request attempting to access dashboard, settings, or administrative routes over external ports is immediately terminated with **HTTP 403 Forbidden** (returning a user-friendly restricted screen for browsers and JSON error for APIs). Direct browser access to the server UI is completely disabled by design.
+
+### 5.2 Internal Desktop Handler & RBAC (`DesktopHandler`)
+Configured in [`internal/transport/http/routes.go`](../internal/transport/http/routes.go) and mounted exclusively into the native Wails application:
 1. **Exempt Public Routes**:
    * Static assets: `/static/*`
-   * Authentication endpoints: `/login`, `/register`, `/api/auth/login`, `/api/auth/register`, `/api/auth/status`
-   * **Telemetry Ingestion Endpoint**: `POST /api/telemetry` (exempt to facilitate direct ingestion from IoT sensors and edge field nodes).
-2. **Unauthenticated Web Page Requests**:
-   * Navigations such as `GET /`, `GET /devices`, or `GET /settings` without a valid session redirect with HTTP `303 See Other` to `/login`.
+   * Authentication endpoints: `/login`, `/register`, `/api/auth/login`, `/api/auth/status`
+   * Telemetry ingestion: `POST /api/telemetry`
+2. **Unauthenticated Desktop Webview Requests**:
+   * Window navigations such as `GET /`, `GET /devices`, or `GET /settings` without a valid session redirect with HTTP `303 See Other` to `/login`.
 3. **Unauthenticated API Requests**:
-   * Requests such as `GET /api/users` or `POST /api/settings/database/save` without a valid session immediately return HTTP `401 Unauthorized`:
-     ```json
-     {"error": "Unauthorized"}
-     ```
+   * Requests without a valid session token return HTTP `401 Unauthorized`.
 4. **Privilege Enforcement (RBAC)**:
-   * Sensitive administrative endpoints (e.g., `/api/users/create`, `/api/settings/database/provision-user`) strictly require `role == RoleAdmin`. Attempts by standard operators return HTTP `403 Forbidden`.
+   * Sensitive endpoints (e.g., `/api/users/create`, `/api/settings/database/save`, `/api/tunnel/save`) strictly require `role == RoleAdmin`. Attempts by standard operators return HTTP `403 Forbidden`.
 
 ---
 
-## 6. Security Audit Logging
+---
+
+## 6. MQTT Broker Hardening & PBKDF2 Authentication
+
+In industrial environments, unauthenticated telemetry streams expose the operational technology network to spoofing and unauthorized packet injection. Noxfort Monitor enforces zero-trust broker hardening:
+
+1. **Mandatory Authentication**: [`mosquitto.conf`](../mosquitto/config/mosquitto.conf) enforces `allow_anonymous false` and specifies `password_file mosquitto/config/passwd`.
+2. **PBKDF2 Password Derivation**: Credentials stored in `mosquitto/config/passwd` are hashed using PBKDF2 (SHA-512) via `mosquitto_passwd`.
+3. **Automated Setup Script**: Administrators initialize or rotate credentials using [`scripts/setup_mqtt_auth.sh`](../scripts/setup_mqtt_auth.sh) or the `make broker-auth` command:
+   ```bash
+   make broker-auth
+   # Generates credentials and synchronizes MQTT_USER and MQTT_PASSWORD into .env
+   ```
+4. **Git Protection**: `mosquitto/config/.gitignore` ensures credential files (`passwd*`) are strictly excluded from version control.
+
+---
+
+## 7. Environment Hardening & Startup Auditing (`env_validator.go`)
+
+To mitigate operational risks on local workstations and servers, [`internal/security/env_validator.go`](../internal/security/env_validator.go) executes automated security validation at every application boot:
+
+* **File Permission Enforcement (`0600`)**: On POSIX/Linux systems, the validator checks the file mode of `.env`. If it detects group or world readability (`perm & 0077 != 0`), it immediately logs a security warning and automatically restricts the file mode to `0600` (readable and writable only by the owner).
+* **Weak Credential Alerts**: If administrative variables (`MONITOR_ADMIN_USER` / `MONITOR_ADMIN_PASSWORD`) are left at default (`admin`/`admin`), a high-priority `[SECURITY] CRITICAL WARNING` is logged.
+* **MQTT Credential Check**: Warns if `MQTT_USER` or `MQTT_PASSWORD` are missing before establishing broker connectivity.
+
+---
+
+## 8. CI/CD Automated Secret Leak Prevention
+
+The continuous integration pipeline ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) incorporates automated security gating:
+* **Pre-Merge Secret Audit**: Every commit and pull request runs a scanning step verifying that no private keys (`*.key`, `*.pem`), credential stores (`mosquitto/config/passwd`), or production environment files (`.env`, `.env.production`) are tracked by Git.
+* **Build Rejection**: If sensitive files are tracked, the pipeline fails immediately and blocks merging.
+
+---
+
+## 9. Security Audit Logging
 
 All sensitive security actions are logged to [`AuditRepository`](../internal/storage/audit_repo.go):
 * Login attempts (successful logins and failures with client IP).
 * User account creation and removal.
 * Modification of notification credentials and persistence switching.
+* Manual or automated database backup snapshots (`DATABASE_BACKUP_CREATED`).
 
 Refer to [Audit Trail](AUDIT_TRAIL.md) for full audit schema and event specifications.
 

@@ -150,6 +150,26 @@ func initSchema(db *sql.DB) error {
 		log.Printf("[STORAGE] Migration Note: %v (Normal if column exists)", err)
 	}
 
+	// 3.4 Migration: Ensure DuckDNS settings exist.
+	migrationDuckDNSToken := "ALTER TABLE settings ADD COLUMN duckdns_token TEXT DEFAULT '';"
+	if _, err := db.Exec(migrationDuckDNSToken); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		log.Printf("[STORAGE] Migration Note: %v (Normal if column exists)", err)
+	}
+
+	migrationDuckDNSDomain := "ALTER TABLE settings ADD COLUMN duckdns_domain TEXT DEFAULT '';"
+	if _, err := db.Exec(migrationDuckDNSDomain); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		log.Printf("[STORAGE] Migration Note: %v (Normal if column exists)", err)
+	}
+
+	migrationDuckDNSEnabled := "ALTER TABLE settings ADD COLUMN duckdns_enabled BOOLEAN DEFAULT 0;"
+	if _, err := db.Exec(migrationDuckDNSEnabled); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		log.Printf("[STORAGE] Migration Note: %v (Normal if column exists)", err)
+	}
+
+	// 3.5 Cleanup obsolete Ngrok credentials and reset any contaminated DuckDNS settings
+	_, _ = db.Exec("UPDATE settings SET ngrok_auth_token = '', ngrok_domain = '', ngrok_enabled = 0 WHERE ngrok_auth_token != '';")
+	_, _ = db.Exec("UPDATE settings SET duckdns_token = '', duckdns_domain = '', duckdns_enabled = 0 WHERE duckdns_domain LIKE '%ngrok%';")
+
 	// Ensure the default settings row exists
 	queryInitSettings := `INSERT OR IGNORE INTO settings (id) VALUES (1);`
 	if _, err := db.Exec(queryInitSettings); err != nil {
@@ -198,13 +218,11 @@ func initSchema(db *sql.DB) error {
 	// 5.1 Migration: Ensure legacy SUPERUSER/MASTER roles map to ADMIN
 	_, _ = db.Exec("UPDATE users SET role = 'ADMIN' WHERE role IN ('SUPERUSER', 'MASTER');")
 
-	// 5.2 Migration: Ensure primary administrator account is restored to ADMIN if demoted
+	// 5.2 Migration: Ensure at least one administrator account exists
 	_, _ = db.Exec(`
 		UPDATE users SET role = 'ADMIN' 
-		WHERE id = (
-			SELECT MIN(id) FROM users WHERE username NOT IN ('superuser_noxfort', 'admin')
-		) 
-		AND (SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND username NOT IN ('superuser_noxfort', 'admin')) = 0;
+		WHERE id = (SELECT MIN(id) FROM users) 
+		AND (SELECT COUNT(*) FROM users WHERE role = 'ADMIN') = 0;
 	`)
 
 	// 6. Security Audit Logs Table

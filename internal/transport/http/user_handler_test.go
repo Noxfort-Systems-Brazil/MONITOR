@@ -204,17 +204,37 @@ func TestUserHandler_CRUDAndAuthorization(t *testing.T) {
 	}
 
 	// 7. Admin tries to delete superuser (must be blocked)
-	delSelfForm := url.Values{}
-	delSelfForm.Set("username", security.SuperuserUsername)
+	delSuperForm := url.Values{}
+	delSuperForm.Set("username", security.SuperuserUsername)
 
+	reqDelSuper := httptest.NewRequest(http.MethodPost, "/api/users/delete", strings.NewReader(delSuperForm.Encode()))
+	reqDelSuper.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqDelSuper.AddCookie(adminCookie)
+	rrDelSuper := httptest.NewRecorder()
+
+	userHandler.HandleDelete(rrDelSuper, reqDelSuper)
+	if rrDelSuper.Code != http.StatusBadRequest {
+		t.Fatalf("Expected deleting superuser to return 400, got %d", rrDelSuper.Code)
+	}
+
+	// 8. Secondary admin self-deletes (allowed, terminates session)
+	_, _ = sm.RegisterWithRole("admin2", "pass2", domain.RoleAdmin)
+	token2 := sm.CreateSession("admin2", domain.RoleAdmin)
+	admin2Cookie := &http.Cookie{Name: "noxfort_session", Value: token2}
+
+	delSelfForm := url.Values{}
+	delSelfForm.Set("username", "admin2")
 	reqDelSelf := httptest.NewRequest(http.MethodPost, "/api/users/delete", strings.NewReader(delSelfForm.Encode()))
 	reqDelSelf.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	reqDelSelf.AddCookie(adminCookie)
+	reqDelSelf.AddCookie(admin2Cookie)
 	rrDelSelf := httptest.NewRecorder()
 
 	userHandler.HandleDelete(rrDelSelf, reqDelSelf)
-	if rrDelSelf.Code != http.StatusBadRequest {
-		t.Fatalf("Expected deleting admin to return 400, got %d", rrDelSelf.Code)
+	if rrDelSelf.Code != http.StatusOK {
+		t.Fatalf("Expected self-delete to return 200, got %d", rrDelSelf.Code)
+	}
+	if !strings.Contains(rrDelSelf.Body.String(), `"self_deleted":true`) {
+		t.Fatalf("Expected self_deleted true in response, got %s", rrDelSelf.Body.String())
 	}
 }
 

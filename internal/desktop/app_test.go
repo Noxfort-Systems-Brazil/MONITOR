@@ -21,8 +21,10 @@
 package desktop
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -155,4 +157,42 @@ func TestDesktopFullscreenEndpoints(t *testing.T) {
 		t.Fatalf("Expected Content-Type application/json, got %s", ct)
 	}
 }
+
+func TestSingleInstance_AcquireLockAndActivation(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+
+	var activated sync.WaitGroup
+	activated.Add(1)
+
+	// 1. First instance acquires lock successfully
+	lock1, err := AcquireLockOrActivate(func() {
+		activated.Done()
+	})
+	if err != nil {
+		t.Fatalf("Expected first instance to acquire lock, got error: %v", err)
+	}
+	defer lock1.Close()
+
+	// 2. Second instance must fail with ErrAlreadyRunning and trigger activation signal
+	lock2, err2 := AcquireLockOrActivate(nil)
+	if !errors.Is(err2, ErrAlreadyRunning) {
+		t.Fatalf("Expected ErrAlreadyRunning for second instance, got: %v", err2)
+	}
+	if lock2 != nil {
+		t.Fatalf("Expected nil closer on second instance")
+	}
+
+	// 3. Close first lock
+	if err := lock1.Close(); err != nil {
+		t.Fatalf("Failed to close lock1: %v", err)
+	}
+
+	// 4. Now a new instance must be able to acquire lock again
+	lock3, err3 := AcquireLockOrActivate(nil)
+	if err3 != nil {
+		t.Fatalf("Expected lock to be acquirable after lock1 closed, got: %v", err3)
+	}
+	defer lock3.Close()
+}
+
 

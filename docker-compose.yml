@@ -21,10 +21,11 @@
 version: '3.8'
 
 services:
-  # MQTT Broker (The Central Nervous System)
+  # MQTT Broker (The Central Nervous System - Optional for environments without native Mosquitto)
   mosquitto:
     image: eclipse-mosquitto:2.0
     container_name: noxfort-broker
+    profiles: ["broker"]
     ports:
       - "1883:1883" # Standard MQTT Port
       - "9001:9001" # Websocket Port (for future web clients)
@@ -33,3 +34,30 @@ services:
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
     restart: unless-stopped
+
+  # Caddy Reverse Proxy with Automatic HTTPS (DuckDNS DNS-01 Challenge)
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    container_name: noxfort-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 (QUIC)
+    environment:
+      - DUCKDNS_DOMAIN=${DUCKDNS_DOMAIN:-}
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN:-}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@noxfort.local}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
+
