@@ -67,7 +67,7 @@
                     <div class="col-4">
                         <input type="radio" class="btn-check" name="provider_select" id="prov_custom" value="custom" autocomplete="off">
                         <label class="btn btn-outline-light w-100 py-3 border-secondary opacity-75" for="prov_custom">
-                            <i class="fa-solid fa-server fs-4 mb-1 text-warning"></i><br><small>Other</small>
+                            <i class="fa-solid fa-server fs-4 mb-1 text-warning"></i><br><small data-i18n="settings_smtp_provider_other">Other</small>
                         </label>
                     </div>
                 </div>
@@ -80,7 +80,7 @@
                             <span class="small opacity-75" id="guide_text">...</span>
                             <div class="mt-2">
                                 <a href="#" target="_blank" id="guide_link" class="btn btn-sm btn-info text-dark fw-bold">
-                                    Generate Password <i class="fa-solid fa-external-link-alt ms-1"></i>
+                                    <span data-i18n="settings_smtp_generate_pass">Generate Password</span> <i class="fa-solid fa-external-link-alt ms-1"></i>
                                 </a>
                             </div>
                         </div>
@@ -89,13 +89,13 @@
 
                 <div class="form-floating mb-3">
                     <input type="email" class="form-control bg-black text-white border-secondary"
-                           id="smtp_user" name="smtp_user" placeholder="Email"
+                           id="smtp_user" name="smtp_user" placeholder="Email" data-i18n-placeholder="settings_smtp_email_label"
                            value="{{ .Settings.SMTPUser }}" required>
                     <label for="smtp_user" class="text-muted" data-i18n="settings_smtp_email_label">Email Address</label>
                 </div>
                 <div class="form-floating mb-4">
                     <input type="password" class="form-control bg-black text-white border-secondary"
-                           id="smtp_pass" name="smtp_pass" placeholder="App Password"
+                           id="smtp_pass" name="smtp_pass" placeholder="App Password" data-i18n-placeholder="settings_smtp_pass_label"
                            value="{{ .Settings.SMTPPass }}">
                     <label for="smtp_pass" class="text-muted" id="pass_label" data-i18n="settings_smtp_pass_label">Password</label>
                 </div>

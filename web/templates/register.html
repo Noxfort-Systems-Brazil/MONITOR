@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/img/logo.png" type="image/png">
-    <title>Cadastro · Noxfort Monitor™</title>
+    <title data-i18n="auth_register_title">Cadastro · Noxfort Monitor™</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/lipis/flag-icons@7.2.3/css/flag-icons.min.css">
     <style>
         body {
             min-height: 100vh;
@@ -24,10 +25,16 @@
             background: rgba(22, 27, 34, 0.95);
             border: 1px solid #30363d;
             box-shadow: 0 15px 35px rgba(0,0,0,0.6);
+            position: relative;
         }
         .form-control:focus {
             border-color: #f0ad4e;
             box-shadow: 0 0 0 0.25rem rgba(240, 173, 78, 0.25);
+        }
+        .register-lang-dropdown {
+            position: absolute;
+            top: 15px;
+            right: 15px;
         }
     </style>
 </head>
@@ -35,21 +42,38 @@
 
 <div class="container p-3">
     <div class="register-card mx-auto p-4 p-md-5">
+        <!-- Language Switcher -->
+        <div class="dropdown register-lang-dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle d-flex align-items-center py-1 px-2" type="button" id="langDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                <span id="current-lang-flag" class="fi fi-br me-1"></span>
+                <span id="current-lang-label" style="font-size: 0.75rem;">PT</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end shadow" aria-labelledby="langDropdown">
+                <li><button class="dropdown-item lang-btn d-flex align-items-center small" type="button" data-lang="en"><span class="fi fi-us me-2"></span> English (US)</button></li>
+                <li><button class="dropdown-item lang-btn d-flex align-items-center small" type="button" data-lang="pt"><span class="fi fi-br me-2"></span> Português (BR)</button></li>
+                <li><hr class="dropdown-divider border-secondary my-1"></li>
+                <li><button class="dropdown-item lang-btn d-flex align-items-center small" type="button" data-lang="es"><span class="fi fi-es me-2"></span> Español</button></li>
+                <li><button class="dropdown-item lang-btn d-flex align-items-center small" type="button" data-lang="fr"><span class="fi fi-fr me-2"></span> Français</button></li>
+                <li><button class="dropdown-item lang-btn d-flex align-items-center small" type="button" data-lang="ru"><span class="fi fi-ru me-2"></span> Русский</button></li>
+                <li><button class="dropdown-item lang-btn d-flex align-items-center small" type="button" data-lang="zh"><span class="fi fi-cn me-2"></span> 中文 (Mandarin)</button></li>
+            </ul>
+        </div>
+
         <div class="text-center mb-4">
             <img src="/static/img/logo.png" alt="Noxfort Logo" height="48" class="mb-3">
-            <h3 class="fw-bold text-white mb-1">Criar Conta</h3>
-            <p class="text-muted small">Noxfort Monitor™ · Sistema de Orquestração Industrial</p>
+            <h3 class="fw-bold text-white mb-1" data-i18n="auth_create_account">Criar Conta</h3>
+            <p class="text-muted small" data-i18n="meta_footer">Noxfort Monitor™ · Sistema de Orquestração Industrial</p>
         </div>
 
         {{ if not .HasAdmin }}
         <div class="alert alert-info bg-dark border-info small mb-4 text-center">
             <i class="fa-solid fa-crown me-1 text-warning"></i>
-            <strong>Primeiro Acesso:</strong> Você está criando a <strong>conta Administradora única</strong> do sistema com permissão total.
+            <span data-i18n="auth_first_access_banner">Primeiro Acesso: Você está criando a conta Administradora única do sistema com permissão total.</span>
         </div>
         {{ else }}
         <div class="alert alert-secondary bg-dark border-secondary small mb-4 text-center">
             <i class="fa-solid fa-user-gear me-1 text-info"></i>
-            <strong>Cadastro de Operador:</strong> Esta conta terá permissão de <strong>somente leitura</strong> no monitoramento.
+            <span data-i18n="auth_operator_banner">Cadastro de Operador: Esta conta terá permissão de somente leitura no monitoramento.</span>
         </div>
         {{ end }}
 
@@ -57,45 +81,48 @@
 
         <form id="registerForm">
             <div class="mb-3">
-                <label for="username" class="form-label small text-muted text-uppercase fw-bold">Nome de Usuário</label>
+                <label for="username" class="form-label small text-muted text-uppercase fw-bold" data-i18n="auth_username_label">Nome de Usuário</label>
                 <div class="input-group">
                     <span class="input-group-text bg-black border-secondary text-muted"><i class="fa-solid fa-user"></i></span>
-                    <input type="text" class="form-control bg-black text-white border-secondary" id="username" name="username" placeholder="Ex: operador_linha1" required autofocus>
+                    <input type="text" class="form-control bg-black text-white border-secondary" id="username" name="username" placeholder="Ex: operador_linha1" data-i18n-placeholder="auth_register_user_placeholder" required autofocus>
                 </div>
             </div>
 
             <div class="mb-3">
-                <label for="password" class="form-label small text-muted text-uppercase fw-bold">Senha</label>
+                <label for="password" class="form-label small text-muted text-uppercase fw-bold" data-i18n="auth_password_label">Senha</label>
                 <div class="input-group">
                     <span class="input-group-text bg-black border-secondary text-muted"><i class="fa-solid fa-lock"></i></span>
-                    <input type="password" class="form-control bg-black text-white border-secondary" id="password" name="password" placeholder="Mínimo 4 caracteres" required>
+                    <input type="password" class="form-control bg-black text-white border-secondary" id="password" name="password" placeholder="Mínimo 4 caracteres" data-i18n-placeholder="auth_register_pass_placeholder" required>
                 </div>
             </div>
 
             <div class="mb-4">
-                <label for="password_confirm" class="form-label small text-muted text-uppercase fw-bold">Confirmar Senha</label>
+                <label for="password_confirm" class="form-label small text-muted text-uppercase fw-bold" data-i18n="auth_confirm_password">Confirmar Senha</label>
                 <div class="input-group">
                     <span class="input-group-text bg-black border-secondary text-muted"><i class="fa-solid fa-check-double"></i></span>
-                    <input type="password" class="form-control bg-black text-white border-secondary" id="password_confirm" name="password_confirm" placeholder="Repita sua senha" required>
+                    <input type="password" class="form-control bg-black text-white border-secondary" id="password_confirm" name="password_confirm" placeholder="Repita sua senha" data-i18n-placeholder="auth_repeat_password_placeholder" required>
                 </div>
             </div>
 
             <div class="d-grid mb-3">
                 <button type="submit" id="btn-submit" class="btn btn-success py-2 fw-bold">
-                    <i class="fa-solid fa-user-check me-2"></i> Concluir Cadastro
+                    <i class="fa-solid fa-user-check me-2"></i> <span data-i18n="auth_btn_finish_register">Concluir Cadastro</span>
                 </button>
             </div>
         </form>
 
         <div class="text-center mt-4 pt-3 border-top border-secondary">
             <p class="text-muted small mb-0">
-                Já possui uma conta? 
-                <a href="/login" class="text-warning text-decoration-none fw-bold">Fazer Login</a>
+                <span data-i18n="auth_already_have_account">Já possui uma conta?</span> 
+                <a href="/login" class="text-warning text-decoration-none fw-bold" data-i18n="auth_do_login">Fazer Login</a>
             </p>
         </div>
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/js/i18n.js"></script>
+<script src="/static/js/app.js"></script>
 <script>
 const form = document.getElementById('registerForm');
 const alertBox = document.getElementById('feedback-alert');
@@ -111,13 +138,13 @@ form.addEventListener('submit', async (e) => {
 
     if (password !== confirm) {
         alertBox.className = 'alert alert-danger shadow-sm mb-3 small';
-        alertBox.textContent = '❌ As senhas digitadas não coincidem.';
+        alertBox.textContent = '❌ ' + (window._t('auth_passwords_mismatch', 'As senhas digitadas não coincidem.'));
         alertBox.classList.remove('d-none');
         return;
     }
 
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Cadastrando...';
+    submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i><span>' + (window._t('auth_registering', 'Cadastrando...')) + '</span>';
 
     try {
         const fd = new FormData();
@@ -135,7 +162,7 @@ form.addEventListener('submit', async (e) => {
                 try { localStorage.setItem('noxfort_session', data.token); } catch(e){}
             }
             alertBox.className = 'alert alert-success shadow-sm mb-3 small';
-            alertBox.textContent = `✅ Conta criada com sucesso como ${data.role}! Entrando...`;
+            alertBox.textContent = '✅ ' + (window._t('auth_register_success', 'Conta criada com sucesso! Entrando...'));
             alertBox.classList.remove('d-none');
             setTimeout(() => window.location.replace('/'), 500);
         } else {
@@ -143,14 +170,14 @@ form.addEventListener('submit', async (e) => {
             alertBox.textContent = '❌ ' + (data.message || 'Falha ao cadastrar.');
             alertBox.classList.remove('d-none');
             submitBtn.disabled = false;
-            submitBtn.innerHTML = '<i class="fa-solid fa-user-check me-2"></i>Concluir Cadastro';
+            submitBtn.innerHTML = '<i class="fa-solid fa-user-check me-2"></i><span data-i18n="auth_btn_finish_register">' + (window._t('auth_btn_finish_register', 'Concluir Cadastro')) + '</span>';
         }
     } catch (err) {
         alertBox.className = 'alert alert-danger shadow-sm mb-3 small';
-        alertBox.textContent = '❌ Erro de conexão: ' + err.message;
+        alertBox.textContent = '❌ ' + (window._t('common_network_error', 'Erro de conexão')) + ': ' + err.message;
         alertBox.classList.remove('d-none');
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="fa-solid fa-user-check me-2"></i>Concluir Cadastro';
+        submitBtn.innerHTML = '<i class="fa-solid fa-user-check me-2"></i><span data-i18n="auth_btn_finish_register">' + (window._t('auth_btn_finish_register', 'Concluir Cadastro')) + '</span>';
     }
 });
 </script>

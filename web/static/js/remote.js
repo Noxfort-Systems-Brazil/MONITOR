@@ -60,7 +60,8 @@ document.addEventListener('DOMContentLoaded', () => {
             await checkStatus();
             setTimeout(() => {
                 btnRefresh.disabled = false;
-                btnRefresh.innerHTML = '<i class="fa-solid fa-arrows-rotate me-1"></i> Atualizar';
+                const refreshText = window._t ? window._t('common_refresh', 'Atualizar') : 'Atualizar';
+                btnRefresh.innerHTML = `<i class="fa-solid fa-arrows-rotate me-1"></i> ${refreshText}`;
             }, 800);
         });
     }
@@ -96,7 +97,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } finally {
                 if (btnSaveCredentials) {
                     btnSaveCredentials.disabled = false;
-                    btnSaveCredentials.innerHTML = '<i class="fa-solid fa-floppy-disk me-2"></i> Salvar Credenciais';
+                    const saveText = window._t ? window._t('remote_save_credentials_btn', 'Salvar Credenciais') : 'Salvar Credenciais';
+                    btnSaveCredentials.innerHTML = `<i class="fa-solid fa-floppy-disk me-2"></i> ${saveText}`;
                 }
             }
         });
@@ -126,12 +128,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     ui.showFeedback(`Falha ao conectar: ${data?.error || 'Erro desconhecido'}`, 'danger');
                     btnConnectTunnel.disabled = false;
-                    btnConnectTunnel.innerHTML = '<i class="fa-solid fa-play me-2"></i> Conectar DuckDNS';
+                    const connBtnText = window._t ? window._t('remote_connect_btn', 'Conectar DuckDNS') : 'Conectar DuckDNS';
+                    btnConnectTunnel.innerHTML = `<i class="fa-solid fa-play me-2"></i> ${connBtnText}`;
                 }
             } catch (err) {
                 ui.showFeedback('Erro de comunicação: ' + err.message, 'danger');
                 btnConnectTunnel.disabled = false;
-                btnConnectTunnel.innerHTML = '<i class="fa-solid fa-play me-2"></i> Conectar DuckDNS';
+                const connBtnText = window._t ? window._t('remote_connect_btn', 'Conectar DuckDNS') : 'Conectar DuckDNS';
+                btnConnectTunnel.innerHTML = `<i class="fa-solid fa-play me-2"></i> ${connBtnText}`;
             }
         });
     }
@@ -149,12 +153,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     ui.showFeedback('Erro ao desconectar DuckDNS.', 'danger');
                     btnStopTunnel.disabled = false;
-                    btnStopTunnel.innerHTML = '<i class="fa-solid fa-power-off me-2"></i> Desconectar DuckDNS';
+                    const discText = window._t ? window._t('remote_disconnect_btn', 'Desconectar DuckDNS') : 'Desconectar DuckDNS';
+                    btnStopTunnel.innerHTML = `<i class="fa-solid fa-power-off me-2"></i> ${discText}`;
                 }
             } catch (err) {
                 ui.showFeedback('Erro de rede: ' + err.message, 'danger');
                 btnStopTunnel.disabled = false;
-                btnStopTunnel.innerHTML = '<i class="fa-solid fa-power-off me-2"></i> Desconectar DuckDNS';
+                const discText = window._t ? window._t('remote_disconnect_btn', 'Desconectar DuckDNS') : 'Desconectar DuckDNS';
+                btnStopTunnel.innerHTML = `<i class="fa-solid fa-power-off me-2"></i> ${discText}`;
             }
         });
     }
@@ -188,7 +194,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } finally {
                 btnTestTunnel.disabled = false;
                 if (iconTestTunnel) iconTestTunnel.className = 'fa-solid fa-stethoscope me-2';
-                if (textTestTunnel) textTestTunnel.textContent = 'Testar Conexão DuckDNS';
+                if (textTestTunnel) textTestTunnel.textContent = window._t ? window._t('remote_test_btn', 'Testar Conexão DuckDNS') : 'Testar Conexão DuckDNS';
             }
         });
     }
@@ -196,7 +202,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Clear Credentials Button
     if (btnDisconnectTunnel) {
         btnDisconnectTunnel.addEventListener('click', async () => {
-            if (!confirm('Deseja realmente remover as credenciais do DuckDNS e desativar o serviço?')) {
+            const confirmClear = window._t ? window._t('remote_confirm_clear', 'Deseja realmente remover as credenciais do DuckDNS e desativar o serviço?') : 'Deseja realmente remover as credenciais do DuckDNS e desativar o serviço?';
+            if (!confirm(confirmClear)) {
                 return;
             }
             btnDisconnectTunnel.disabled = true;

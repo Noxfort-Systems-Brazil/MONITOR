@@ -29,7 +29,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (btnChangeAccount) {
         btnChangeAccount.addEventListener('click', () => {
-            if (confirm('Are you sure you want to reconfigure the alert system?')) {
+            const confirmMsg = window._t ? window._t('settings_reconfigure_confirm', 'Are you sure you want to reconfigure the alert system?') : 'Are you sure you want to reconfigure the alert system?';
+            if (confirm(confirmMsg)) {
                 connectedCard?.classList.add('d-none');
                 setupCard?.classList.remove('d-none');
             }
@@ -115,7 +116,8 @@ document.addEventListener('DOMContentLoaded', function () {
         btnTest.addEventListener('click', function () {
             const originalHTML = btnTest.innerHTML;
             btnTest.disabled = true;
-            btnTest.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Sending...';
+            const sendingText = window._t ? window._t('settings_email_sending', 'Sending...') : 'Sending...';
+            btnTest.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ${sendingText}`;
 
             feedbackAlert.classList.add('d-none');
             feedbackAlert.classList.remove('alert-success', 'alert-danger');
@@ -125,8 +127,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     const text = await response.text();
                     feedbackAlert.classList.remove('d-none');
                     if (response.ok) {
+                        const successText = window._t ? window._t('settings_email_test_success', 'Test email sent correctly.') : 'Test email sent correctly.';
                         feedbackAlert.className = 'alert alert-success shadow-sm mb-4';
-                        feedbackAlert.innerHTML = '<i class="fa-solid fa-check-circle me-2"></i><strong>Success!</strong> Test email sent correctly.';
+                        feedbackAlert.innerHTML = `<i class="fa-solid fa-check-circle me-2"></i><strong>Success!</strong> ${successText}`;
                     } else {
                         feedbackAlert.className = 'alert alert-danger shadow-sm mb-4';
                         feedbackAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Failed:</strong> ' + text;
@@ -135,7 +138,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 .catch(error => {
                     feedbackAlert.classList.remove('d-none');
                     feedbackAlert.className = 'alert alert-danger shadow-sm mb-4';
-                    feedbackAlert.innerHTML = 'Network Error: ' + error;
+                    const netErr = window._t ? window._t('common_network_error', 'Network Error') : 'Network Error';
+                    feedbackAlert.innerHTML = `${netErr}: ` + error;
                 })
                 .finally(() => {
                     btnTest.disabled = false;
@@ -176,11 +180,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (btnTestTelegram) {
         btnTestTelegram.addEventListener('click', async () => {
-            const chatID = prompt('Enter your Telegram Chat ID to receive the test message:\n(Message @userinfobot on Telegram to get yours)');
+            const promptMsg = window._t ? window._t('settings_telegram_prompt_id', 'Enter your Telegram Chat ID to receive the test message:\n(Message @userinfobot on Telegram to get yours)') : 'Enter your Telegram Chat ID to receive the test message:\n(Message @userinfobot on Telegram to get yours)';
+            const chatID = prompt(promptMsg);
             if (!chatID || !chatID.trim()) return;
 
             btnTestTelegram.disabled = true;
-            btnTestTelegram.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Sending...';
+            const tgSendingText = window._t ? window._t('settings_email_sending', 'Sending...') : 'Sending...';
+            btnTestTelegram.innerHTML = `<i class="fa-solid fa-spinner fa-spin me-2"></i>${tgSendingText}`;
 
             try {
                 const fd = new FormData();
@@ -193,10 +199,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     showTelegramAlert('❌ ' + text, 'danger');
                 }
             } catch (e) {
-                showTelegramAlert('❌ Network error: ' + e.message, 'danger');
+                const netErr = window._t ? window._t('common_network_error', 'Network error') : 'Network error';
+                showTelegramAlert(`❌ ${netErr}: ` + e.message, 'danger');
             } finally {
                 btnTestTelegram.disabled = false;
-                btnTestTelegram.innerHTML = '<i class="fa-brands fa-telegram me-2"></i>Send Test Message';
+                const tgTestBtn = window._t ? window._t('settings_tg_test_btn', 'Send Test Message') : 'Send Test Message';
+                btnTestTelegram.innerHTML = `<i class="fa-brands fa-telegram me-2"></i>${tgTestBtn}`;
             }
         });
     }

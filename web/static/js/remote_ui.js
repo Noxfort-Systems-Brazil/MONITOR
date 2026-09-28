@@ -37,7 +37,8 @@ const RemoteUI = {
                 try {
                     await navigator.clipboard.writeText(textToCopy);
                     const originalHTML = btn.innerHTML;
-                    btn.innerHTML = '<i class="fa-solid fa-check text-success me-1"></i> Copiado!';
+                    const copiedText = window._t ? window._t('common_copied', 'Copiado!') : 'Copiado!';
+                    btn.innerHTML = `<i class="fa-solid fa-check text-success me-1"></i> ${copiedText}`;
                     btn.classList.add('btn-success');
                     btn.classList.remove('btn-outline-info', 'btn-outline-secondary', 'btn-outline-light');
                     setTimeout(() => {
@@ -47,7 +48,8 @@ const RemoteUI = {
                     }, 2000);
                 } catch (err) {
                     console.error('Failed to copy: ', err);
-                    RemoteUI.showFeedback('Falha ao copiar para a área de transferência', 'danger');
+                    const copyFailedText = window._t ? window._t('common_copy_failed', 'Falha ao copiar para a área de transferência') : 'Falha ao copiar para a área de transferência';
+                    RemoteUI.showFeedback(copyFailedText, 'danger');
                 }
             });
         });
@@ -93,13 +95,16 @@ const RemoteUI = {
                 badgeTunnelState.innerHTML = '<i class="fa-solid fa-circle-check me-1"></i> ONLINE';
             } else if (status.state === 'CONNECTING') {
                 badgeTunnelState.classList.add('bg-warning', 'text-dark');
-                badgeTunnelState.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> CONECTANDO';
+                const connText = window._t ? window._t('remote_state_connecting', 'CONECTANDO') : 'CONECTANDO';
+                badgeTunnelState.innerHTML = `<i class="fa-solid fa-spinner fa-spin me-1"></i> ${connText}`;
             } else if (status.state === 'ERROR') {
                 badgeTunnelState.classList.add('bg-danger');
-                badgeTunnelState.innerHTML = '<i class="fa-solid fa-circle-exclamation me-1"></i> ERRO';
+                const errText = window._t ? window._t('remote_state_error', 'ERRO') : 'ERRO';
+                badgeTunnelState.innerHTML = `<i class="fa-solid fa-circle-exclamation me-1"></i> ${errText}`;
             } else {
                 badgeTunnelState.classList.add('bg-secondary');
-                badgeTunnelState.innerHTML = '<i class="fa-solid fa-circle-pause me-1"></i> OFFLINE';
+                const offText = window._t ? window._t('remote_state_offline', 'OFFLINE') : 'OFFLINE';
+                badgeTunnelState.innerHTML = `<i class="fa-solid fa-circle-pause me-1"></i> ${offText}`;
             }
         }
 
@@ -108,7 +113,8 @@ const RemoteUI = {
             if (status.ipv6_address) {
                 ipv6Display.innerHTML = `<span class="badge bg-success-subtle text-success border border-success px-2 py-1"><i class="fa-solid fa-bolt me-1"></i> ${status.ipv6_address}</span>`;
             } else {
-                ipv6Display.innerHTML = `<span class="text-muted"><i class="fa-solid fa-circle-info me-1"></i> IPv6 não detectado. Operando via IPv4.</span>`;
+                const ipv6NotDetected = window._t ? window._t('remote_ipv6_not_detected', 'IPv6 não detectado. Operando via IPv4.') : 'IPv6 não detectado. Operando via IPv4.';
+                ipv6Display.innerHTML = `<span class="text-muted"><i class="fa-solid fa-circle-info me-1"></i> ${ipv6NotDetected}</span>`;
             }
         }
 
@@ -130,13 +136,13 @@ const RemoteUI = {
                 if (publicUrlInput) publicUrlInput.value = `${scheme}://${clean}.duckdns.org${portSuffix}/api/telemetry`;
             }
         } else if (status.state === 'CONNECTING') {
-            if (publicUrlInput) publicUrlInput.value = 'Conectando ao DuckDNS...';
+            if (publicUrlInput) publicUrlInput.value = window._t ? window._t('remote_connecting', 'Conectando ao DuckDNS...') : 'Conectando ao DuckDNS...';
         } else {
             if (publicUrlInput) {
                 const hasDomain = (domainInput && domainInput.value.trim()) || status.domain;
                 publicUrlInput.value = hasDomain
-                    ? '[Desconectado] Inicie o DuckDNS para ativar a URL de telemetria'
-                    : 'Aguardando configuração do DuckDNS...';
+                    ? (window._t ? window._t('remote_disconnected_hint', '[Desconectado] Inicie o DuckDNS para ativar a URL de telemetria') : '[Desconectado] Inicie o DuckDNS para ativar a URL de telemetria')
+                    : (window._t ? window._t('remote_waiting_config', 'Aguardando configuração do DuckDNS...') : 'Aguardando configuração do DuckDNS...');
             }
         }
 
@@ -156,18 +162,21 @@ const RemoteUI = {
                 btnConnectTunnel.classList.add('d-none');
                 btnStopTunnel.classList.remove('d-none');
                 btnStopTunnel.disabled = false;
-                btnStopTunnel.innerHTML = '<i class="fa-solid fa-power-off me-2"></i> Desconectar DuckDNS';
+                const discText = window._t ? window._t('remote_disconnect_btn', 'Desconectar DuckDNS') : 'Desconectar DuckDNS';
+                btnStopTunnel.innerHTML = `<i class="fa-solid fa-power-off me-2"></i> ${discText}`;
             } else if (status.state === 'CONNECTING') {
                 btnConnectTunnel.classList.remove('d-none');
                 btnConnectTunnel.disabled = true;
                 btnConnectTunnel.className = 'btn btn-warning text-dark py-2 fw-bold';
-                btnConnectTunnel.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Conectando...';
+                const connText = window._t ? window._t('remote_connecting', 'Conectando...') : 'Conectando...';
+                btnConnectTunnel.innerHTML = `<i class="fa-solid fa-spinner fa-spin me-2"></i> ${connText}`;
                 btnStopTunnel.classList.add('d-none');
             } else {
                 btnConnectTunnel.classList.remove('d-none');
                 btnConnectTunnel.disabled = false;
                 btnConnectTunnel.className = 'btn btn-success py-2 fw-bold';
-                btnConnectTunnel.innerHTML = '<i class="fa-solid fa-play me-2"></i> Conectar DuckDNS';
+                const connBtnText = window._t ? window._t('remote_connect_btn', 'Conectar DuckDNS') : 'Conectar DuckDNS';
+                btnConnectTunnel.innerHTML = `<i class="fa-solid fa-play me-2"></i> ${connBtnText}`;
                 btnStopTunnel.classList.add('d-none');
             }
         }

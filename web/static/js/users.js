@@ -131,7 +131,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (btnAddUser) {
                 btnAddUser.disabled = true;
-                btnAddUser.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Cadastrando...';
+                const creatingText = window._t ? window._t('users_btn_creating', 'Criando...') : 'Criando...';
+                btnAddUser.innerHTML = `<i class="fa-solid fa-spinner fa-spin me-2"></i>${creatingText}`;
             }
 
             try {
@@ -147,18 +148,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const data = await res.json();
                 if (res.ok && data.success) {
-                    showActionAlert(`✅ Usuário "${username}" cadastrado com sucesso!`, 'success');
+                    showActionAlert(`✅ Usuário "${username}" criado com sucesso!`, 'success');
                     addUserForm.reset();
                     setTimeout(() => window.location.reload(), 1000);
                 } else {
-                    showActionAlert('❌ ' + (data.message || 'Erro ao cadastrar usuário'), 'danger');
+                    showActionAlert('❌ ' + (data.message || (window._t ? window._t('common_error', 'Erro ao cadastrar usuário') : 'Erro ao cadastrar usuário')), 'danger');
                 }
             } catch (err) {
-                showActionAlert('❌ Erro de rede: ' + err.message, 'danger');
+                const netErr = window._t ? window._t('common_network_error', 'Erro de rede') : 'Erro de rede';
+                showActionAlert(`❌ ${netErr}: ` + err.message, 'danger');
             } finally {
                 if (btnAddUser) {
                     btnAddUser.disabled = false;
-                    btnAddUser.innerHTML = '<i class="fa-solid fa-plus me-2"></i>Criar Usuário';
+                    const btnCreateText = window._t ? window._t('users_btn_create', 'Criar Conta') : 'Criar Conta';
+                    btnAddUser.innerHTML = `<i class="fa-solid fa-plus me-2"></i>${btnCreateText}`;
                 }
             }
         });
@@ -170,7 +173,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const username = btn.getAttribute('data-username');
             if (!username) return;
 
-            if (!confirm(`Tem certeza que deseja remover o usuário "${username}"?`)) {
+            const confirmMsg = `${window._t ? window._t('users_confirm_delete', 'Tem certeza que deseja remover este usuário?') : 'Tem certeza que deseja remover este usuário?'} ("${username}")`;
+            if (!confirm(confirmMsg)) {
                 return;
             }
 
@@ -186,18 +190,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 if (res.ok && data.success) {
                     if (data.self_deleted) {
-                        alert(`Sua conta "${username}" foi excluída. Você será redirecionado para a tela de login.`);
+                        alert(`Sua conta "${username}" foi excluída. Redirecionando para o login...`);
                         window.location.href = '/login';
                         return;
                     }
-                    showActionAlert(`✅ Usuário "${username}" removido.`, 'success');
+                    showActionAlert(`✅ Usuário "${username}" removido com sucesso.`, 'success');
                     const row = document.getElementById(`user-row-${username}`);
                     if (row) row.remove();
                 } else {
                     showActionAlert('❌ ' + (data.message || 'Falha ao remover usuário.'), 'danger');
                 }
             } catch (err) {
-                showActionAlert('❌ Erro de rede: ' + err.message, 'danger');
+                const netErr = window._t ? window._t('common_network_error', 'Erro de rede') : 'Erro de rede';
+                showActionAlert(`❌ ${netErr}: ` + err.message, 'danger');
             }
         });
     });

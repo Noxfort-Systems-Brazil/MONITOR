@@ -38,23 +38,28 @@ describe('I18nManager Engine', () => {
         document.body.innerHTML = `
             <h1 data-i18n="app_title">Default Title</h1>
             <input data-i18n-placeholder="search_placeholder" placeholder="Default Search" />
+            <button data-i18n-title="copy_tooltip" title="Default Tooltip">Copy</button>
         `;
 
         i18n = createI18nManager();
         i18n.translations = {
             app_title: 'Noxfort Monitor Industrial',
             search_placeholder: 'Pesquisar dispositivos...',
+            copy_tooltip: 'Copiar Endereço',
         };
 
         i18n.applyTranslations();
 
         const title = document.querySelector('[data-i18n="app_title"]');
         const input = document.querySelector('[data-i18n-placeholder]');
+        const btn = document.querySelector('[data-i18n-title]');
 
         expect(title.textContent).toBe('Noxfort Monitor Industrial');
         expect(input.getAttribute('placeholder')).toBe('Pesquisar dispositivos...');
+        expect(btn.getAttribute('title')).toBe('Copiar Endereço');
         expect(window._t('app_title')).toBe('Noxfort Monitor Industrial');
         expect(window._t('unknown_key')).toBe('unknown_key');
+        expect(window._t('unknown_key', 'Fallback Text')).toBe('Fallback Text');
     });
 
     it('loads translation dictionary via fetch', async () => {

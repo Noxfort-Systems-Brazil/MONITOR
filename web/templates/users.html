@@ -2,13 +2,13 @@
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom border-secondary">
     <h1 class="h2 text-warning">
         <i class="fa-solid fa-users-gear me-2"></i>
-        <span>Gerenciamento de Usuários</span>
+        <span data-i18n="users_title">Gerenciamento de Usuários</span>
     </h1>
 
     <div class="d-flex align-items-center gap-2">
         <span class="badge bg-warning bg-opacity-25 text-warning border border-warning px-3 py-2">
             <i class="fa-solid fa-crown me-1"></i>
-            Administrador: <strong class="text-white font-monospace">{{ .CurrentUser }}</strong>
+            <span data-i18n="users_admin_badge">Administrador:</span> <strong class="text-white font-monospace ms-1">{{ .CurrentUser }}</strong>
         </span>
     </div>
 </div>
@@ -24,26 +24,26 @@
                     <div class="card-header border-secondary bg-black bg-opacity-25 py-3">
                         <h5 class="mb-0 text-white">
                             <i class="fa-solid fa-user-plus me-2 text-info"></i>
-                            <span>Novo Usuário</span>
+                            <span data-i18n="users_new_user">Novo Usuário</span>
                         </h5>
                     </div>
                     <div class="card-body p-4">
-                        <p class="text-muted small mb-4">
+                        <p class="text-muted small mb-4" data-i18n="users_new_user_desc">
                             Cadastre uma conta de <strong>Operador</strong> (somente leitura) ou <strong>Administrador</strong> (acesso completo).
                         </p>
 
                         <form id="addUserForm">
                             <div class="mb-3">
-                                <label for="new_username" class="form-label text-muted small fw-bold">NOME DE USUÁRIO</label>
+                                <label for="new_username" class="form-label text-muted small fw-bold" data-i18n="users_username_label">NOME DE USUÁRIO</label>
                                 <div class="input-group">
                                     <span class="input-group-text bg-black border-secondary text-muted"><i class="fa-solid fa-user"></i></span>
                                     <input type="text" class="form-control bg-black text-white border-secondary"
-                                           id="new_username" name="username" placeholder="Ex: operador_noite" required>
+                                           id="new_username" name="username" placeholder="Ex: operador_noite" data-i18n-placeholder="users_username_placeholder" required>
                                 </div>
                             </div>
 
                             <div class="mb-3">
-                                <label for="new_password" class="form-label text-muted small fw-bold">SENHA</label>
+                                <label for="new_password" class="form-label text-muted small fw-bold" data-i18n="users_password_label">SENHA</label>
                                 <div class="input-group">
                                     <span class="input-group-text bg-black border-secondary text-muted"><i class="fa-solid fa-key"></i></span>
                                     <input type="password" class="form-control bg-black text-white border-secondary"
@@ -52,16 +52,16 @@
                             </div>
 
                             <div class="mb-4">
-                                <label for="new_role" class="form-label text-muted small fw-bold">PERFIL DE ACESSO</label>
+                                <label for="new_role" class="form-label text-muted small fw-bold" data-i18n="users_role_label">PERFIL DE ACESSO</label>
                                 <select class="form-select bg-black text-white border-secondary" id="new_role" name="role">
-                                    <option value="OPERATOR" selected>Operador (Visualização / Dashboards)</option>
-                                    <option value="ADMIN">Administrador (Acesso Total / Configurações)</option>
+                                    <option value="OPERATOR" selected data-i18n="users_role_operator_option">Operador (Visualização / Dashboards)</option>
+                                    <option value="ADMIN" data-i18n="users_role_admin_option">Administrador (Acesso Total / Configurações)</option>
                                 </select>
                             </div>
 
                             <div class="d-grid">
                                 <button type="submit" id="btn-add-user" class="btn btn-success py-2 fw-bold">
-                                    <i class="fa-solid fa-plus me-2"></i> Criar Conta
+                                    <i class="fa-solid fa-plus me-2"></i> <span data-i18n="users_btn_create">Criar Conta</span>
                                 </button>
                             </div>
                         </form>
@@ -75,19 +75,19 @@
                     <div class="card-header border-secondary bg-black bg-opacity-25 d-flex justify-content-between align-items-center py-3">
                         <h5 class="mb-0 text-white">
                             <i class="fa-solid fa-users me-2 text-warning"></i>
-                            <span>Contas do Sistema</span>
+                            <span data-i18n="users_list_title">Contas do Sistema</span>
                         </h5>
-                        <span class="badge bg-secondary" id="user-count">{{ len .Users }} contas</span>
+                        <span class="badge bg-secondary" id="user-count">{{ len .Users }} <span data-i18n="users_count_label">contas</span></span>
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
                             <table class="table table-dark table-hover mb-0 align-middle">
                                 <thead class="table-black border-secondary text-muted small text-uppercase">
                                     <tr>
-                                        <th class="ps-4">Usuário</th>
-                                        <th>Perfil</th>
-                                        <th>Data de Cadastro</th>
-                                        <th class="text-end pe-4">Ações</th>
+                                        <th class="ps-4" data-i18n="users_col_username">Usuário</th>
+                                        <th data-i18n="users_col_role">Perfil</th>
+                                        <th data-i18n="users_col_created">Data de Cadastro</th>
+                                        <th class="text-end pe-4" data-i18n="users_col_actions">Ações</th>
                                     </tr>
                                 </thead>
                                 <tbody id="users-table-body">
@@ -108,9 +108,9 @@
                                         </td>
                                         <td>
                                             {{ if eq .Role "ADMIN" }}
-                                            <span class="badge bg-warning text-dark fw-bold">ADMINISTRADOR</span>
+                                            <span class="badge bg-warning text-dark fw-bold" data-i18n="users_badge_admin">ADMINISTRADOR</span>
                                             {{ else }}
-                                            <span class="badge bg-info bg-opacity-25 text-info border border-info">OPERADOR (LEITURA)</span>
+                                            <span class="badge bg-info bg-opacity-25 text-info border border-info" data-i18n="users_badge_operator">OPERADOR (LEITURA)</span>
                                             {{ end }}
                                         </td>
                                         <td class="text-muted small font-monospace">
@@ -118,11 +118,11 @@
                                         </td>
                                         <td class="text-end pe-4">
                                             {{ if eq .Username $.Superuser }}
-                                            <button class="btn btn-outline-secondary btn-sm" disabled title="A conta de Superusuário não pode ser excluída">
+                                            <button class="btn btn-outline-secondary btn-sm" disabled title="A conta de Superusuário não pode ser excluída" data-i18n-title="users_superuser_lock_tooltip">
                                                 <i class="fa-solid fa-lock"></i>
                                             </button>
                                             {{ else }}
-                                            <button class="btn btn-outline-danger btn-sm btn-delete-user" data-username="{{ .Username }}" title="Remover Usuário">
+                                            <button class="btn btn-outline-danger btn-sm btn-delete-user" data-username="{{ .Username }}" title="Remover Usuário" data-i18n-title="users_delete_tooltip">
                                                 <i class="fa-solid fa-trash-can"></i>
                                             </button>
                                             {{ end }}
@@ -130,7 +130,7 @@
                                     </tr>
                                     {{ else }}
                                     <tr>
-                                        <td colspan="4" class="text-center text-muted py-4">
+                                        <td colspan="4" class="text-center text-muted py-4" data-i18n="users_empty">
                                             Nenhum usuário cadastrado.
                                         </td>
                                     </tr>
@@ -145,96 +145,5 @@
     </div>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const addUserForm = document.getElementById('addUserForm');
-    const actionFeedback = document.getElementById('action-feedback');
-    const btnAddUser = document.getElementById('btn-add-user');
-
-    function showAlert(msg, type = 'success') {
-        if (!actionFeedback) return;
-        actionFeedback.className = `alert alert-${type} shadow-sm mb-4`;
-        actionFeedback.textContent = msg;
-        actionFeedback.classList.remove('d-none');
-        setTimeout(() => actionFeedback.classList.add('d-none'), 4000);
-    }
-
-    if (addUserForm) {
-        addUserForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const username = document.getElementById('new_username')?.value.trim();
-            const password = document.getElementById('new_password')?.value;
-
-            if (!username || !password) return;
-
-            btnAddUser.disabled = true;
-            btnAddUser.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Criando...';
-
-            try {
-                const role = document.getElementById('new_role')?.value || 'OPERATOR';
-                const fd = new FormData();
-                fd.append('username', username);
-                fd.append('password', password);
-                fd.append('role', role);
-
-                const res = await fetch('/api/auth/register', {
-                    method: 'POST',
-                    body: fd
-                });
-
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    showAlert(`✅ Usuário "${username}" (${role}) criado com sucesso!`, 'success');
-                    addUserForm.reset();
-                    setTimeout(() => window.location.reload(), 1000);
-                } else {
-                    showAlert('❌ ' + (data.message || 'Erro ao criar usuário'), 'danger');
-                }
-            } catch (err) {
-                showAlert('❌ Erro de conexão: ' + err.message, 'danger');
-            } finally {
-                btnAddUser.disabled = false;
-                btnAddUser.innerHTML = '<i class="fa-solid fa-plus me-2"></i>Criar Conta';
-            }
-        });
-    }
-
-    document.querySelectorAll('.btn-delete-user').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const username = btn.getAttribute('data-username');
-            if (!username) return;
-
-            if (!confirm(`Deseja remover a conta do usuário "${username}"?`)) {
-                return;
-            }
-
-            try {
-                const fd = new FormData();
-                fd.append('username', username);
-
-                const res = await fetch('/api/users/delete', {
-                    method: 'POST',
-                    body: fd
-                });
-
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    if (data.self_deleted) {
-                        alert(`Sua conta "${username}" foi excluída. Você será redirecionado para a tela de login.`);
-                        window.location.href = '/login';
-                        return;
-                    }
-                    showAlert(`✅ Usuário "${username}" excluído com sucesso.`, 'success');
-                    const row = document.getElementById(`user-row-${username}`);
-                    if (row) row.remove();
-                } else {
-                    showAlert('❌ ' + (data.message || 'Falha ao remover.'), 'danger');
-                }
-            } catch (err) {
-                showAlert('❌ Erro de rede: ' + err.message, 'danger');
-            }
-        });
-    });
-});
-</script>
+<script src="/static/js/users.js"></script>
 {{ end }}

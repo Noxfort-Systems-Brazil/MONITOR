@@ -20,7 +20,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
         <span data-i18n="remote_title">Acesso Remoto &amp; Telemetria (DuckDNS)</span>
     </h1>
     <div class="btn-toolbar mb-2 mb-md-0">
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-refresh-status" title="Atualizar Status">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-refresh-status" title="Atualizar Status" data-i18n-title="common_refresh">
             <i class="fa-solid fa-arrows-rotate me-1"></i> <span data-i18n="common_refresh">Atualizar</span>
         </button>
     </div>
@@ -37,20 +37,20 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                     <div class="d-flex align-items-center">
                         <i class="fa-solid fa-network-wired text-info fs-4 me-3"></i>
                         <div>
-                            <div class="text-uppercase small fw-bold text-muted">IPv6 Global Público (Direto)</div>
+                            <div class="text-uppercase small fw-bold text-muted" data-i18n="remote_ipv6_title">IPv6 Global Público (Direto)</div>
                             <div class="font-monospace text-light small" id="ipv6-display">
                                 {{ if .Status.IPv6Address }}
                                     <span class="badge bg-success-subtle text-success border border-success px-2 py-1">
                                         <i class="fa-solid fa-bolt me-1"></i> {{ .Status.IPv6Address }}
                                     </span>
                                 {{ else }}
-                                    <span class="text-muted"><i class="fa-solid fa-circle-info me-1"></i> IPv6 não detectado. Operando via IPv4.</span>
+                                    <span class="text-muted"><i class="fa-solid fa-circle-info me-1"></i> <span data-i18n="remote_ipv6_not_detected">IPv6 não detectado. Operando via IPv4.</span></span>
                                 {{ end }}
                             </div>
                         </div>
                     </div>
                     <div class="text-end">
-                        <div class="text-uppercase small fw-bold text-muted">Porta Local</div>
+                        <div class="text-uppercase small fw-bold text-muted" data-i18n="remote_local_port">Porta Local</div>
                         <span class="badge bg-black border border-secondary text-info font-monospace fs-6" id="badge-local-port">{{ .LocalPort }}</span>
                     </div>
                 </div>
@@ -63,7 +63,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
             <div class="card-header border-secondary bg-black bg-opacity-25 d-flex justify-content-between align-items-center py-3">
                 <h5 class="mb-0 text-white">
                     <i class="fa-solid fa-globe me-2 text-info"></i>
-                    <span>Domínio &amp; Ingestão DuckDNS</span>
+                    <span data-i18n="remote_duckdns_header">Domínio &amp; Ingestão DuckDNS</span>
                 </h5>
                 <span id="badge-tunnel-state" class="badge rounded-pill px-3 py-2 fs-6
                     {{ if eq .Status.State "ONLINE" }}bg-success{{ else if eq .Status.State "CONNECTING" }}bg-warning text-dark{{ else if eq .Status.State "ERROR" }}bg-danger{{ else }}bg-secondary{{ end }}">
@@ -77,27 +77,27 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                 <div id="tunnel-online-banner" class="alert alert-success bg-black border-success d-flex align-items-center mb-4 {{ if ne .Status.State "ONLINE" }}d-none{{ end }}">
                     <i class="fa-solid fa-shield-halved fs-3 text-success me-3"></i>
                     <div>
-                        <div class="fw-bold text-success mb-1">Domínio Vinculado e Operando</div>
-                        <small class="text-light">Pronto para receber telemetria direta de qualquer máquina remota (Synapse, Carina e nós externos).</small>
+                        <div class="fw-bold text-success mb-1" data-i18n="remote_online_banner_title">Domínio Vinculado e Operando</div>
+                        <small class="text-light" data-i18n="remote_online_banner_sub">Pronto para receber telemetria direta de qualquer máquina remota (Synapse, Carina e nós externos).</small>
                     </div>
                 </div>
 
                 {{/* Endereço de Telemetria Unificado */}}
                 <div class="mb-4">
                     <label class="form-label text-muted small fw-bold text-uppercase d-flex justify-content-between">
-                        <span><i class="fa-solid fa-link me-1 text-info"></i> Endereço Fixo de Telemetria</span>
-                        <span class="text-info small"><i class="fa-solid fa-arrow-right-arrow-left me-1"></i>Porta Fixa <span class="local-port-label">{{ .LocalPort }}</span></span>
+                        <span><i class="fa-solid fa-link me-1 text-info"></i> <span data-i18n="remote_telemetry_address">Endereço Fixo de Telemetria</span></span>
+                        <span class="text-info small"><i class="fa-solid fa-arrow-right-arrow-left me-1"></i><span data-i18n="remote_fixed_port">Porta Fixa</span> <span class="local-port-label">{{ .LocalPort }}</span></span>
                     </label>
                     <div class="input-group mb-2">
                         <input type="text" class="form-control bg-black text-info font-monospace border-secondary py-2 fs-6"
                                id="public-telemetry-url"
                                value="{{ if eq .Status.State "ONLINE" }}{{ if .Status.TelemetryURL }}{{ .Status.TelemetryURL }}{{ else if .Status.UseHTTPS }}https://{{ .Settings.DuckDNSDomain }}.duckdns.org/api/telemetry{{ else }}http://{{ .Settings.DuckDNSDomain }}.duckdns.org:{{ .LocalPort }}/api/telemetry{{ end }}{{ else if .Settings.DuckDNSDomain }}[Desconectado] Inicie o DuckDNS para ativar a URL de telemetria{{ else }}Aguardando configuração do DuckDNS...{{ end }}"
                                readonly>
-                        <button class="btn btn-info text-dark fw-bold copy-btn px-4" type="button" data-target="public-telemetry-url" title="Copiar Link">
-                            <i class="fa-solid fa-copy me-1"></i> <span>Copiar Link</span>
+                        <button class="btn btn-info text-dark fw-bold copy-btn px-4" type="button" data-target="public-telemetry-url" title="Copiar Link" data-i18n-title="remote_copy_link">
+                            <i class="fa-solid fa-copy me-1"></i> <span data-i18n="remote_copy_link">Copiar Link</span>
                         </button>
                     </div>
-                    <small class="text-muted">
+                    <small class="text-muted" data-i18n="remote_telemetry_hint">
                         Cole este endereço na configuração do <strong>Synapse</strong>, <strong>Carina</strong> ou scripts externos para enviar telemetria.
                     </small>
                 </div>
@@ -115,7 +115,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                         <div class="mb-3">
                             <label for="duckdns_token" class="form-label text-light small fw-bold">
                                 <i class="fa-solid fa-key me-1 text-warning"></i>
-                                <span>Token de Conta DuckDNS</span>
+                                <span data-i18n="remote_duckdns_token_label">Token de Conta DuckDNS</span>
                             </label>
                             <div class="input-group">
                                 <input type="password" class="form-control bg-black text-white border-secondary font-monospace"
@@ -127,7 +127,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                                 </button>
                             </div>
                             <small class="text-muted">
-                                Copiado do seu painel gratuito em <a href="https://www.duckdns.org" target="_blank" class="text-info text-decoration-none">duckdns.org</a>.
+                                <span data-i18n="remote_duckdns_token_hint">Copiado do seu painel gratuito em duckdns.org.</span>
                             </small>
                         </div>
 
@@ -135,7 +135,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                         <div class="mb-4">
                             <label for="duckdns_domain" class="form-label text-light small fw-bold">
                                 <i class="fa-solid fa-globe me-1 text-info"></i>
-                                <span>Subdomínio DuckDNS</span>
+                                <span data-i18n="remote_duckdns_subdomain_label">Subdomínio DuckDNS</span>
                             </label>
                             <div class="input-group">
                                 <input type="text" class="form-control bg-black text-white border-secondary font-monospace"
@@ -144,7 +144,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                                        value="{{ .Settings.DuckDNSDomain }}" required>
                                 <span class="input-group-text bg-black border-secondary text-muted font-monospace">.duckdns.org</span>
                             </div>
-                            <small class="text-muted">
+                            <small class="text-muted" data-i18n="remote_duckdns_subdomain_hint">
                                 Subdomínio que você criou no DuckDNS para apontar para esta máquina.
                             </small>
                         </div>
@@ -154,11 +154,11 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                             {{/* Botão Principal de Conexão */}}
                             <button type="button" id="btn-connect-tunnel" class="btn btn-success py-2 fw-bold {{ if eq .Status.State "ONLINE" }}d-none{{ end }}">
                                 <i class="fa-solid fa-play me-2" id="icon-connect-tunnel"></i>
-                                <span id="text-connect-tunnel">Conectar DuckDNS</span>
+                                <span id="text-connect-tunnel" data-i18n="remote_connect_btn">Conectar DuckDNS</span>
                             </button>
                             <button type="button" id="btn-stop-tunnel" class="btn btn-danger py-2 fw-bold {{ if ne .Status.State "ONLINE" }}d-none{{ end }}">
                                 <i class="fa-solid fa-power-off me-2" id="icon-stop-tunnel"></i>
-                                <span id="text-stop-tunnel">Desconectar DuckDNS</span>
+                                <span id="text-stop-tunnel" data-i18n="remote_disconnect_btn">Desconectar DuckDNS</span>
                             </button>
 
                             {{/* Linha Secundária: Salvar e Testar */}}
@@ -166,13 +166,13 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                                 <div class="col-12 col-sm-6">
                                     <button type="submit" id="btn-save-credentials" class="btn btn-outline-light w-100 py-2 fw-bold">
                                         <i class="fa-solid fa-floppy-disk me-2" id="icon-save-credentials"></i>
-                                        <span id="text-save-credentials">Salvar Credenciais</span>
+                                        <span id="text-save-credentials" data-i18n="remote_save_credentials_btn">Salvar Credenciais</span>
                                     </button>
                                 </div>
                                 <div class="col-12 col-sm-6">
                                     <button type="button" id="btn-test-tunnel" class="btn btn-outline-info w-100 py-2 fw-bold">
                                         <i class="fa-solid fa-stethoscope me-2" id="icon-test-tunnel"></i>
-                                        <span id="text-test-tunnel">Testar Conexão DuckDNS</span>
+                                        <span id="text-test-tunnel" data-i18n="remote_test_btn">Testar Conexão DuckDNS</span>
                                     </button>
                                 </div>
                             </div>
@@ -181,7 +181,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                             <div class="text-center mt-2">
                                 <button type="button" id="btn-disconnect-tunnel" class="btn btn-link text-muted text-decoration-none btn-sm {{ if not .Settings.DuckDNSToken }}d-none{{ end }}">
                                     <i class="fa-solid fa-trash-can me-1"></i>
-                                    <span>Limpar Credenciais Salvas</span>
+                                    <span data-i18n="remote_clear_credentials_btn">Limpar Credenciais Salvas</span>
                                 </button>
                             </div>
                         </div>
@@ -192,12 +192,12 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
             {{/* Rodapé */}}
             <div class="card-footer bg-black bg-opacity-25 border-secondary text-muted small d-flex justify-content-between align-items-center">
                 <span>
-                    <i class="fa-solid fa-server me-1"></i> Porta Fixa: <strong class="local-port-label">{{ .LocalPort }}</strong>
+                    <i class="fa-solid fa-server me-1"></i> <span data-i18n="remote_fixed_port">Porta Fixa</span>: <strong class="local-port-label">{{ .LocalPort }}</strong>
                     <span class="mx-2">&bull;</span>
-                    <i class="fa-solid fa-clock me-1"></i> Atualizado: <span id="tunnel-started-time">{{ if .Status.StartedAt }}{{ .Status.StartedAt }}{{ else }}--{{ end }}</span>
+                    <i class="fa-solid fa-clock me-1"></i> <span data-i18n="dash_last_update">Atualizado</span>: <span id="tunnel-started-time">{{ if .Status.StartedAt }}{{ .Status.StartedAt }}{{ else }}--{{ end }}</span>
                 </span>
                 <a href="https://www.duckdns.org" target="_blank" class="text-info text-decoration-none">
-                    <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> <span>Painel DuckDNS</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> <span data-i18n="remote_dashboard_link">Painel DuckDNS</span>
                 </a>
             </div>
         </div>

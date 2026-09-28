@@ -224,7 +224,8 @@ class DatabaseSettingsController {
     }
 
     async handleRevertSQLite() {
-        if (!confirm('Deseja realmente desconectar do PostgreSQL e voltar a operar no SQLite local embutido?')) {
+        const confirmMsg = window._t ? window._t('server_revert_sqlite_confirm', 'Deseja realmente desconectar do PostgreSQL e voltar a operar no SQLite local embutido?') : 'Deseja realmente desconectar do PostgreSQL e voltar a operar no SQLite local embutido?';
+        if (!confirm(confirmMsg)) {
             return;
         }
         this.view.showAlert('Desconectando do PostgreSQL e reativando SQLite local...', 'info');
@@ -237,7 +238,8 @@ class DatabaseSettingsController {
                 this.view.showAlert(`❌ Erro ao voltar para SQLite: ${data?.error || 'Erro desconhecido'}`, 'danger');
             }
         } catch (e) {
-            this.view.showAlert(`❌ Falha de comunicação: ${e.message}`, 'danger');
+            const netErr = window._t ? window._t('common_network_error', 'Falha de comunicação') : 'Falha de comunicação';
+            this.view.showAlert(`❌ ${netErr}: ${e.message}`, 'danger');
         }
     }
 }

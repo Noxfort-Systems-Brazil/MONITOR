@@ -103,7 +103,7 @@ class DatabaseView {
         } else {
             if (this.statusBadge) {
                 this.statusBadge.className = 'badge bg-warning text-dark';
-                this.statusBadge.innerHTML = `<i class="fa-solid fa-file-shield me-1"></i> SQLite Local (Padrão)`;
+                this.statusBadge.innerHTML = `<i class="fa-solid fa-file-shield me-1"></i> SQLite (${window._t ? window._t('settings_db_type_sqlite_sub', 'Local') : 'Local'})`;
             }
             if (this.modeNotice) {
                 this.modeNotice.className = 'alert alert-dark border-secondary d-flex align-items-center mb-4 py-2 px-3';
@@ -112,13 +112,13 @@ class DatabaseView {
                 this.modeIcon.className = 'fa-solid fa-circle-info text-info me-2 fs-5';
             }
             if (this.modeText) {
-                this.modeText.innerHTML = `O Monitor opera por padrão no <strong>SQLite local</strong> (zero configuração). Conecte ao PostgreSQL abaixo para compartilhar o ecossistema com CARINA e SYNAPSE.`;
+                this.modeText.innerHTML = window._t ? window._t('server_sqlite_default_notice', 'O Monitor opera por padrão no <strong>SQLite local</strong> (zero configuração). Conecte ao PostgreSQL para unificar ao ecossistema Noxfort com CARINA e SYNAPSE.') : 'O Monitor opera por padrão no <strong>SQLite local</strong> (zero configuração). Conecte ao PostgreSQL para unificar ao ecossistema Noxfort com CARINA e SYNAPSE.';
             }
             if (this.revertContainer) {
                 this.revertContainer.classList.add('d-none');
             }
             if (this.latencyDisplay) {
-                this.latencyDisplay.textContent = '0 ms (SQLite Local)';
+                this.latencyDisplay.textContent = `0 ms (${window._t ? window._t('settings_db_type_sqlite_sub', 'Local') : 'Local'})`;
             }
         }
     }
@@ -212,10 +212,12 @@ class DatabaseView {
         if (!this.btnSubmitProvision) return;
         if (state === 'loading') {
             this.btnSubmitProvision.disabled = true;
-            this.btnSubmitProvision.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Criando usuário...';
+            const creatingText = window._t ? window._t('server_prov_creating', 'Criando usuário...') : 'Criando usuário...';
+            this.btnSubmitProvision.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${creatingText}`;
         } else {
             this.btnSubmitProvision.disabled = false;
-            this.btnSubmitProvision.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-2"></i> Criar Usuário e Conectar';
+            const btnText = window._t ? window._t('server_prov_submit_btn', 'Criar Usuário e Conectar') : 'Criar Usuário e Conectar';
+            this.btnSubmitProvision.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles me-2"></i> ${btnText}`;
         }
     }
 

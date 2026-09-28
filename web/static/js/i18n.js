@@ -32,6 +32,7 @@ class I18nManager {
     constructor() {
         this.currentLang = this.detectLanguage();
         this.translations = {};
+        window._t = (key, fallback) => this.translations[key] || fallback || key;
     }
 
     /**
@@ -124,7 +125,14 @@ class I18nManager {
             if (translation) el.setAttribute('placeholder', translation);
         });
 
-        // 3. data-role → translate role names stored in English from the DB
+        // 3. data-i18n-title → title attribute
+        document.querySelectorAll('[data-i18n-title]').forEach(el => {
+            const key = el.getAttribute('data-i18n-title');
+            const translation = this.translations[key];
+            if (translation) el.setAttribute('title', translation);
+        });
+
+        // 4. data-role → translate role names stored in English from the DB
         const roleKeyMap = {
             'system admin': 'contact_role_admin',
             'technician': 'contact_role_technician',
@@ -136,8 +144,8 @@ class I18nManager {
             if (key && this.translations[key]) el.textContent = this.translations[key];
         });
 
-        // 4. Expose window._t for JS-side translations (confirm dialogs, etc.)
-        window._t = (key) => this.translations[key] || key;
+        // 5. Expose window._t for JS-side translations (confirm dialogs, etc.)
+        window._t = (key, fallback) => this.translations[key] || fallback || key;
 
         // 5. Update HTML lang attribute for accessibility
         document.documentElement.lang = this.currentLang;
