@@ -1,5 +1,5 @@
 # Noxfort Monitor™ - Caddy Reverse Proxy Configuration
-# Copyright (C) 2026 Gabriel Moraes - Noxfort Systems
+# Copyright (C) 2026 Noxfort Systems
 
 {
 	# Email can be optionally provided via environment variable

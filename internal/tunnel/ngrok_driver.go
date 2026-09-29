@@ -1,5 +1,5 @@
 // Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
-// Copyright (C) 2026 Gabriel Moraes - Noxfort Systems
+// Copyright (C) 2026 Noxfort Systems
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as

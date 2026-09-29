@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Caddy with DuckDNS DNS-01 ACME plugin
-# Noxfort Monitor™ - Copyright (C) 2026 Gabriel Moraes - Noxfort Systems
+# Noxfort Monitor™ - Copyright (C) 2026 Noxfort Systems
 
 FROM caddy:builder-alpine AS builder
 

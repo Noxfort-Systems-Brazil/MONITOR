@@ -1,5 +1,5 @@
 # Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
-# Copyright (C) 2026 Gabriel Moraes - Noxfort Systems
+# Copyright (C) 2026 Noxfort Systems
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -174,4 +174,4 @@ services-logs:
 		echo "⚠️  Docker Compose não encontrado."; \
 	fi
 
-.PHONY: all build run run-headless clean lint test test-backend test-frontend deps build-linux broker-start broker-stop broker-status broker-install broker-auth backup backup-list deb caddy-build services-start services-stop services-logs
+.PHONY: all build run run-headless clean lint test test-backend test-frontend deps build-linux broker-start broker-stop broker-status broker-install broker-auth backup backup-list deb caddy-build services-start services-stop services-logs
