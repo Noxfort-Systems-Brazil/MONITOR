@@ -44,7 +44,7 @@ graph TD
 
 1. **DuckDNS + Caddy (Primary / Recommended)**:
    - Synchronizes your custom subdomain (`your-subdomain.duckdns.org`) with your host machine's public IPv4/IPv6.
-   - [Caddy Server](../CADDY_INTEGRATION.md) obtains valid TLS certificates via **DNS-01 ACME challenge** without requiring inbound port 80 to be open.
+   - [Caddy Server](caddy_integration.md) obtains valid TLS certificates via **DNS-01 ACME challenge** without requiring inbound port 80 to be open.
    - Standardizes external traffic on ports 80 and 443 with encrypted WebSockets (`/mqtt`).
 2. **Ngrok Reverse Tunnel (Zero-Forwarding Fallback)**:
    - Establishes an encrypted outbound TLS tunnel for networks behind strict carrier CGNAT where port forwarding is impossible.

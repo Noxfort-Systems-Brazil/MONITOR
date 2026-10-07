@@ -1,43 +1,53 @@
-# 🌐 Acceso Remoto e Ingestión WAN (Túnel Ngrok)
+# 🌐 Acceso Remoto e Ingestión WAN (DuckDNS y Ngrok)
 
-Este documento detalla la arquitectura de comunicación en red de área amplia (WAN) de **Noxfort Monitor™ v2.0**, cubriendo el túnel inverso mediante **Ngrok**, el traspaso de cortafuegos y CGNAT, y la ingestión de agentes externos (**Carina**, **Synapse**).
+Este documento detalla la arquitectura de comunicación en red de área amplia (WAN) de **Noxfort Monitor™ v2.0**, cubriendo la sincronización dinámica de IP mediante **DuckDNS**, terminación TLS automática con **Caddy Server** y soporte alternativo de túnel inverso con **Ngrok** para la ingestión de telemetria externa (**Carina**, **Synapse**).
 
-⬅️ [Hub Central](../README.md) | 🏛️ [Arquitectura](architecture.md) | 📡 [API](api_reference.md) | 🚀 [Despliegue](deployment.md)
+⬅️ [Centro de Documentación](README.md) | 🏛️ [Arquitectura](architecture.md) | 📡 [API](api_reference.md) | 🚀 [Despliegue](deployment.md)
 
 ---
 
-## 1. El Rol del Túnel Inverso Industrial
+## 1. Estrategias de Conectividad WAN
 
-En despliegues de monitorización industrial, el servidor central a menudo reside dentro de una red local privada (LAN), detrás de enrutadores NAT, conexiones móviles con CGNAT o cortafuegos empresariales que prohíben la apertura de puertos entrantes.
+Noxfort Monitor implementa una estrategia dual para traspasar barreras de red:
 
 ```mermaid
-graph LR
-    subgraph "Red Externa / WAN"
+graph TD
+    subgraph "Nodos de Borde Externos (WAN)"
         Carina[Agente Carina / Borde]
         Synapse[Agente Synapse / Nube]
-        Sensor[Sensor IoT / 4G]
+        Sensor[Sensor IoT / Módem 4G]
     end
 
-    subgraph "Nube Segura Ngrok"
-        EdgeURL[https://tu-dominio.ngrok-free.app]
+    subgraph "Estrategia A: DuckDNS + Caddy Reverse Proxy (Recomendada)"
+        DuckDNS[Servicio Dynamic DNS DuckDNS]
+        Caddy[Caddy Edge Gateway :80/:443 - DNS-01 ACME]
     end
 
-    subgraph "Red Local / Cortafuegos Industrial (LAN)"
-        TunnelManager[Tunnel Manager / Driver Ngrok]
-        MonitorServer[Servidor Noxfort Monitor HTTP :22100]
+    subgraph "Estrategia B: Túnel Inverso Ngrok (Alternativa)"
+        NgrokEdge[Nube Segura Ngrok]
+    end
+
+    subgraph "Red Local / Host del Servidor"
+        ExtHTTP[Noxfort Monitor Core HTTP :22100 - POST /api/telemetry]
         StateManager[State Manager & Watchdog]
     end
 
-    Carina -->|POST /api/telemetry| EdgeURL
-    Synapse -->|POST /api/telemetry| EdgeURL
-    Sensor -->|POST /api/telemetry| EdgeURL
+    Carina -->|HTTPS POST :443| Caddy
+    Synapse -->|HTTPS POST :443| Caddy
+    Sensor -->|HTTPS POST| NgrokEdge
 
-    EdgeURL -->|Túnel TLS Saliente Cifrado| TunnelManager
-    TunnelManager -->|Proxy Local de Loopback| MonitorServer
-    MonitorServer --> StateManager
+    Caddy -.->|Sincronización de IP| DuckDNS
+    Caddy -->|Proxy Inverso Local| ExtHTTP
+    NgrokEdge -->|Túnel Cifrado Saliente| ExtHTTP
+    ExtHTTP --> StateManager
 ```
 
-Al establecer un enlace cifrado TLS de **salida** hacia Ngrok, Noxfort Monitor recibe telemetría de la internet pública sin necesidad de contar con una dirección IP pública estática.
+1. **DuckDNS + Caddy (Primario / Recomendado)**:
+   * Sincroniza dinámicamente tu subdominio (`tu-subdominio.duckdns.org`) con las direcciones IPv4/IPv6 públicas de la máquina.
+   * [Caddy Server](caddy_integration.md) obtiene y renueva certificados SSL/TLS válidos automáticamente mediante **desafío ACME DNS-01** (sin requerir abrir el puerto 80).
+   * Estandariza todo el tráfico en el puerto 443 con WebSockets cifrados (`/mqtt`).
+2. **Túnel Inverso Ngrok (Alternativa para CGNAT Estricto)**:
+   * Establece un enlace saliente seguro hacia la nube de Ngrok para instalaciones donde no es posible configurar redirección de puertos.
 
 ---
 
@@ -50,8 +60,9 @@ type Service interface {
     Stop() error
     GetStatus() Status
     IsBinaryAvailable() bool
+    TestConnection(ctx context.Context, token, domain string) (*TestResult, error)
 }
 ```
 
-* **`NgrokDriver`**: Controla el cliente binario de Ngrok, captura la URL pública asignada y verifica la salud de la conexión.
-* **Dominios Estáticos**: Soporta dominios fijos reservados para mantener intacta la configuración de los sensores tras reinicios.
+* **`DuckDNSDriver`**: Actualiza registros mediante la API HTTP de DuckDNS, detecta direcciones IPv6 del sistema y ejecuta diagnósticos de resolución (`POST /api/tunnel/test`).
+* **`NgrokDriver`**: Gestiona el binario de Ngrok y extrae las URLs públicas del cliente local.

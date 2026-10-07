@@ -1,7 +1,26 @@
 #!/usr/bin/env bash
-# Script: scripts/build_deb.sh
-# Builds a self-contained .deb package for Noxfort Monitor
-# Usage: bash scripts/build_deb.sh
+# ==============================================================================
+# Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
+# Copyright (C) 2026 Noxfort Systems
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# File: scripts/build_deb.sh
+# Author: Gabriel Moraes
+# Date: 2026-03-20
+# Description: Builds a self-contained Debian package (.deb) for Noxfort Monitor
+# ==============================================================================
 
 set -e
 
@@ -63,9 +82,9 @@ systemctl enable mosquitto 2>/dev/null || true
 systemctl start  mosquitto 2>/dev/null || true
 
 echo ""
-echo "✅ Noxfort Monitor instalado com sucesso!"
-echo "   Execute: noxfort-monitor"
-echo "   Ou procure 'Noxfort Monitor' no menu de aplicativos."
+echo "✅ Noxfort Monitor successfully installed!"
+echo "   Run: noxfort-monitor"
+echo "   Or find 'Noxfort Monitor' in the application menu."
 echo ""
 POSTINST
 chmod 755 "${DEB_DIR}/DEBIAN/postinst"

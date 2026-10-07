@@ -38,7 +38,7 @@ import (
 // Default superuser credentials intended strictly for zero-friction open-source testing from GitHub.
 const (
 	DefaultSuperuserUsername = "admin"
-	DefaultSuperuserPassword = "admin"
+	DefaultSuperuserPassword = "Admin@Noxfort2026!"
 )
 
 // SuperuserUsername and SuperuserPassword store the actively resolved credentials.
@@ -170,11 +170,11 @@ func BootstrapSuperuser(userRepo domain.UserRepository, hasher PasswordHasher) e
 	SuperuserUsername = creds.Username
 	SuperuserPassword = creds.Password
 
-	// Anti-backdoor protection: if custom credentials are used, ensure default test admin:admin cannot exist
+	// Anti-backdoor protection: if custom credentials are used, ensure default test admin account cannot exist
 	if creds.IsCustom && creds.Username != DefaultSuperuserUsername {
 		adminUser, _ := userRepo.GetByUsername(DefaultSuperuserUsername)
 		if adminUser != nil {
-			if hasher.Verify(DefaultSuperuserPassword, adminUser.PasswordHash) {
+			if hasher.Verify(DefaultSuperuserPassword, adminUser.PasswordHash) || hasher.Verify("admin", adminUser.PasswordHash) {
 				_ = userRepo.DeleteByUsername(DefaultSuperuserUsername)
 				log.Printf("[SECURITY] Conta de teste padrão '%s' purgada com sucesso para ambiente de produção.", DefaultSuperuserUsername)
 			}

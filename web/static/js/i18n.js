@@ -26,7 +26,7 @@
 
 const I18N_STORAGE_KEY = 'noxfort_language';
 const DEFAULT_LANG = 'pt';
-const SUPPORTED_LANGS = ['en', 'pt', 'es', 'fr', 'ru', 'zh']; // Atualizado para incluir todas as opções do menu
+const SUPPORTED_LANGS = ['en', 'pt', 'es', 'fr', 'ru', 'zh']; // Updated to include all menu options
 
 class I18nManager {
     constructor() {

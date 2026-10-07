@@ -1,9 +1,9 @@
-# Binários e Executáveis
+# Binaries and Executables
 /bin/
 *.exe
 noxfort-monitor
 
-# Dados e Logs do Mosquitto
+# Mosquitto Data and Logs
 mosquitto/data/*
 !mosquitto/data/.gitkeep
 mosquitto/log/*
@@ -11,7 +11,7 @@ mosquitto/log/*
 *.db
 *.log
 
-# Arquivos de Ambiente e Credenciais Locais (Privados)
+# Environment Files and Local Credentials (Private)
 .env
 .env.*
 *.env
@@ -23,11 +23,11 @@ mosquitto/config/passwd*
 *.pem
 *.key
 
-# Backups do Banco de Dados
+# Database Backups
 backups/
 *.bak
 
-# Pacotes e artefatos de build
+# Packages and Build Artifacts
 *.deb
 build_deb/
 node_modules/

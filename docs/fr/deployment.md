@@ -9,12 +9,18 @@ Ce document fournit les instructions de déploiement de **Noxfort Monitor™ v2.
 ## 1. Installation par Paquet Debian (`.deb`)
 
 ```bash
-# Génération du paquet .deb
+# Génération du paquet .deb (généré à la racine comme noxfort-monitor_2.0.1_amd64.deb)
 make deb
 
-# Installation sur l'hôte Ubuntu/Debian
-sudo dpkg -i build_deb/noxfort-monitor_2.0.1_amd64.deb
+# Option A : Installation ou mise à niveau automatique via Makefile
+make install-deb
+
+# Option B : Installation directe via dpkg
+sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
 sudo apt-get install -f
+
+# Pour désinstaller :
+make uninstall-deb
 ```
 
 Le paquet installe l'exécutable dans `/opt/noxfort-monitor/`, crée le lien `/usr/local/bin/noxfort-monitor`, configure les raccourcis de bureau et active le service Mosquitto MQTT.
@@ -58,7 +64,17 @@ sudo journalctl -u noxfort-monitor -f
 
 ---
 
-## 3. Proxy Inverse NGINX avec SSL
+## 3. Proxy Inverse et Passerelle HTTPS (Caddy ou NGINX)
+
+### 3.1 Option A : Serveur Caddy avec DuckDNS (Recommandée)
+L'écosystème intègre une passerelle Caddy conteneurisée avec émission automatique de certificats via **DNS-01 ACME** :
+```bash
+make caddy-build
+make services-start
+```
+Consultez le guide complet dans [Intégration Caddy et DuckDNS](caddy_integration.md).
+
+### 3.2 Option B : NGINX pour l'Ingestion avec SSL
 
 ```nginx
 server {

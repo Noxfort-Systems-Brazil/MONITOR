@@ -1,5 +1,22 @@
 // Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
 // Copyright (C) 2026 Noxfort Systems
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// File: internal/security/env_validator_test.go
+// Author: Gabriel Moraes
+// Date: 2026-09-28
 
 package security
 
@@ -36,13 +53,13 @@ func TestValidateEnvironmentSecurity(t *testing.T) {
 	}
 
 	// Test default admin detection
-	os.Setenv("MONITOR_ADMIN_USER", "admin")
-	os.Setenv("MONITOR_ADMIN_PASSWORD", "admin")
+	os.Setenv("MONITOR_ADMIN_USER", DefaultSuperuserUsername)
+	os.Setenv("MONITOR_ADMIN_PASSWORD", DefaultSuperuserPassword)
 	defer os.Unsetenv("MONITOR_ADMIN_USER")
 	defer os.Unsetenv("MONITOR_ADMIN_PASSWORD")
 
 	reportAdmin := ValidateEnvironmentSecurity(envFile)
 	if !reportAdmin.DefaultAdminAlert {
-		t.Errorf("Expected DefaultAdminAlert to be true for default admin/admin")
+		t.Errorf("Expected DefaultAdminAlert to be true for default admin credentials")
 	}
 }

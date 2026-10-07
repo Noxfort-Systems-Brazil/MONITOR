@@ -68,10 +68,23 @@ curl -X POST http://localhost:22100/api/telemetry \
 |---|---|---|---|
 | `/api/auth/login` | `POST` | Público | Autentica credenciais e emite cookie `noxfort_session`. |
 | `/api/auth/logout` | `POST` | Autenticado | Invalida o token de sessão ativo. |
-| `/api/devices` | `GET` | Operador+ | Retorna equipamentos cadastrados e status `LastSeen`. |
-| `/api/devices/delete` | `POST` | Admin | Remove um dispositivo do monitoramento. |
+| `/api/auth/status` | `GET` | Público | Retorna estado de autenticação, usuário e papel da sessão. |
+| `/api/auth/register` | `POST` | Admin | Alias protegido de criação de conta com validação de complexidade de senha. |
+| `/devices` | `GET` | Operador+ | Renderiza a tela de gerenciamento de sistemas com equipamentos e `last_seen`. |
+| `/devices/delete` | `GET` | Admin | Remove um dispositivo pelo parâmetro query (`?id=xyz`) e redireciona (303). |
+| `/contacts` | `GET` | Operador+ | Renderiza o painel de gerenciamento da Equipe de Resposta. |
+| `/contacts/create` | `POST` | Admin | Cadastra novo contato de alerta (nome, email, telefone, telegram_chat_id, cargo). |
+| `/contacts/update` | `POST` | Admin | Atualiza dados e canais de notificação de um contato existente. |
+| `/contacts/delete` | `POST` | Admin | Remove um contato da equipe de resposta. |
+| `/api/users` | `GET` | Admin | Retorna listagem JSON com todos os operadores cadastrados. |
+| `/api/users/create` | `POST` | Admin | Cria nova conta de operador ou admin (exige senha forte de 8+ dígitos). |
+| `/api/users/delete` | `POST` | Admin | Remove uma conta de operador (o superusuário é protegido contra exclusão). |
+| `/api/settings/database/status` | `GET` | Autenticado | Retorna tipo do banco ativo (Postgres/SQLite), versão e latência. |
 | `/api/settings/database/test` | `POST` | Admin | Testa credenciais do PostgreSQL antes da troca. |
 | `/api/settings/database/save` | `POST` | Admin | Recarrega repositórios ativos com o motor de destino (opção `migrate=true`). |
+| `/api/settings/database/provision-user` | `POST` | Admin | Cria usuário dedicado com privilégios restritos no esquema do PostgreSQL. |
+| `/api/settings/database/backup` | `POST` | Admin | Dispara um snapshot consistente a quente do banco de dados (`VACUUM INTO` / `pg_dump`). |
+| `/api/settings/database/backups` | `GET` | Admin | Lista os snapshots de backup salvos no diretório `backups/`. |
 | `/api/tunnel/status` | `GET` | Autenticado | Retorna estado, provedor (DuckDNS/Ngrok), URLs e IPv6. |
 | `/api/tunnel/save` | `POST` | Admin | Persiste credenciais do DuckDNS / Ngrok no banco. |
 | `/api/tunnel/start` | `POST` | Admin | Dispara atualização dinâmica DuckDNS ou abre túnel. |
@@ -81,8 +94,11 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/audit/security` | `GET` | Admin | Consulta logs de segurança e tentativas de login. |
 | `/api/audit/alerts` | `GET` | Admin | Consulta logs de SLA e entrega de alertas. |
 | `/api/audit/transitions` | `GET` | Admin | Consulta transições de estado dos nós (quedas/recuperações). |
-| `/api/settings/database/backup` | `POST` | Admin | Dispara um snapshot consistente a quente do banco de dados (SQLite/Postgres). |
-| `/api/settings/database/backups` | `GET` | Admin | Lista os snapshots de backup salvos em disco. |
+| `/settings/test` | `POST` | Admin | Dispara e-mail de teste utilizando as configurações SMTP ativas. |
+| `/settings/test-telegram` | `POST` | Admin | Dispara mensagem de teste MarkdownV2 para o Telegram configurado. |
+| `/api/open-external` | `POST` | Autenticado | Solicita a abertura de URL externa no navegador padrão do sistema operacional. |
+| `/api/window/toggle-fullscreen` | `POST` | Público | Alterna a janela Wails entre modo tela cheia e normal. |
+| `/api/window/exit-fullscreen` | `POST` | Público | Sai do modo tela cheia. |
 
 ---
 

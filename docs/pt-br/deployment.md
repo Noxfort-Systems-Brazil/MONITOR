@@ -9,12 +9,18 @@ Este documento fornece instruções passo a passo para a implantação do **Noxf
 ## 1. Instalação via Pacote Debian (`.deb`)
 
 ```bash
-# Compilar o instalador .deb
+# Compilar o instalador .deb (gerado na raiz como noxfort-monitor_2.0.1_amd64.deb)
 make deb
 
-# Instalar no servidor Ubuntu/Debian
-sudo dpkg -i build_deb/noxfort-monitor_2.0.1_amd64.deb
+# Opção A: Instalação automática via Makefile
+make install-deb
+
+# Opção B: Instalação via dpkg no servidor Ubuntu/Debian
+sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
 sudo apt-get install -f
+
+# Para desinstalar:
+make uninstall-deb
 ```
 
 Instala os binários em `/opt/noxfort-monitor/`, cria o link simbólico `/usr/local/bin/noxfort-monitor`, registra os atalhos de sistema e habilita o serviço Mosquitto MQTT.
@@ -66,7 +72,7 @@ O ecossistema disponibiliza gateway Caddy em contêiner com validação automát
 make caddy-build
 make services-start
 ```
-Consulte o guia completo em [Integração Caddy & DuckDNS](../CADDY_INTEGRATION.md).
+Consulte o guia completo em [Integração Caddy & DuckDNS](caddy_integration.md).
 
 ### 3.2 Opção B: NGINX para Ingestão de Telemetria
 ```nginx

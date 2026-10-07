@@ -91,8 +91,8 @@ func (sm *SecurityManager) RegisterWithRole(username, password, role string) (*d
 		return nil, errors.New("Nome de usuário e senha são obrigatórios")
 	}
 
-	if len(password) < 4 {
-		return nil, errors.New("A senha deve conter pelo menos 4 caracteres")
+	if err := ValidatePasswordComplexity(password); err != nil {
+		return nil, err
 	}
 
 	existing, _ := sm.userRepo.GetByUsername(username)

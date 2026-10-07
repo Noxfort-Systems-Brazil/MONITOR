@@ -87,7 +87,7 @@ func TestUserHandler_CRUDAndAuthorization(t *testing.T) {
 	// 1. Unauthenticated attempt to register must be rejected (403)
 	formOp := url.Values{}
 	formOp.Set("username", "plant_op")
-	formOp.Set("password", "operatorpass")
+	formOp.Set("password", "Operator#Pass2026")
 
 	reqUnauth := httptest.NewRequest(http.MethodPost, "/api/users/create", strings.NewReader(formOp.Encode()))
 	reqUnauth.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -145,7 +145,7 @@ func TestUserHandler_CRUDAndAuthorization(t *testing.T) {
 	// 4. Operator logs in successfully via AuthHandler
 	opLoginForm := url.Values{}
 	opLoginForm.Set("username", "plant_op")
-	opLoginForm.Set("password", "operatorpass")
+	opLoginForm.Set("password", "Operator#Pass2026")
 
 	reqOpLogin := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(opLoginForm.Encode()))
 	reqOpLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -218,7 +218,7 @@ func TestUserHandler_CRUDAndAuthorization(t *testing.T) {
 	}
 
 	// 8. Secondary admin self-deletes (allowed, terminates session)
-	_, _ = sm.RegisterWithRole("admin2", "pass2", domain.RoleAdmin)
+	_, _ = sm.RegisterWithRole("admin2", "Admin2#Pass2026", domain.RoleAdmin)
 	token2 := sm.CreateSession("admin2", domain.RoleAdmin)
 	admin2Cookie := &http.Cookie{Name: "noxfort_session", Value: token2}
 

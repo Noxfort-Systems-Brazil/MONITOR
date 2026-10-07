@@ -9,12 +9,18 @@ This document provides deployment instructions for **Noxfort Monitor™ v2.0**, 
 ## 1. Debian Package Installation (`.deb`)
 
 ```bash
-# Build the .deb installer
+# Build the .deb installer (generated in repository root as noxfort-monitor_2.0.1_amd64.deb)
 make deb
 
-# Install on target Ubuntu/Debian host
-sudo dpkg -i build_deb/noxfort-monitor_2.0.1_amd64.deb
+# Option A: Automatic Makefile install/upgrade
+make install-deb
+
+# Option B: Direct dpkg installation on target Ubuntu/Debian host
+sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
 sudo apt-get install -f
+
+# To uninstall:
+make uninstall-deb
 ```
 
 Installs the executable to `/opt/noxfort-monitor/`, creates `/usr/local/bin/noxfort-monitor`, registers system shortcuts, and enables Mosquitto MQTT.
@@ -66,7 +72,7 @@ The ecosystem includes a containerized Caddy edge gateway with automated **DNS-0
 make caddy-build
 make services-start
 ```
-See the complete guide in [Caddy & DuckDNS Integration](../CADDY_INTEGRATION.md).
+See the complete guide in [Caddy & DuckDNS Integration](caddy_integration.md).
 
 ### 3.2 Option B: NGINX for Ingestion Proxy
 ```nginx

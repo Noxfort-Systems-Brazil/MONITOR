@@ -66,7 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Form Submit: Salvar Credenciais
+    // Form Submit: Save Credentials
     if (tunnelForm) {
         tunnelForm.addEventListener('submit', async (e) => {
             e.preventDefault();

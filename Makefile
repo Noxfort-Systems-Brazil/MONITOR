@@ -131,6 +131,14 @@ deb:
 	@chmod +x build_installer.sh
 	@./build_installer.sh
 
+# 11b. Install the generated .deb package (replaces/upgrades existing)
+install-deb:
+	@sudo apt install -y ./noxfort-monitor_*.deb
+
+# 11c. Uninstall Noxfort Monitor package
+uninstall-deb:
+	@sudo apt remove -y noxfort-monitor
+
 # ---- Caddy & Edge Reverse Proxy (Docker) ----
 
 DOCKER_COMPOSE := $(shell if command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; elif docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo ""; fi)
@@ -152,7 +160,7 @@ services-start:
 		$(DOCKER_COMPOSE) up -d; \
 		echo "✅ Services started. Caddy listening on ports 80/443."; \
 	else \
-		echo "⚠️  Docker Compose não encontrado. Instale com: sudo apt install docker-compose-v2"; \
+		echo "⚠️  Docker Compose not found. Install with: sudo apt install docker-compose-v2"; \
 		exit 1; \
 	fi
 
@@ -163,7 +171,7 @@ services-stop:
 		$(DOCKER_COMPOSE) down; \
 		echo "✅ Services stopped."; \
 	else \
-		echo "⚠️  Docker Compose não encontrado."; \
+		echo "⚠️  Docker Compose not found."; \
 	fi
 
 # 15. View Caddy and Mosquitto live logs
@@ -171,7 +179,7 @@ services-logs:
 	@if [ -n "$(DOCKER_COMPOSE)" ]; then \
 		$(DOCKER_COMPOSE) logs -f caddy; \
 	else \
-		echo "⚠️  Docker Compose não encontrado."; \
+		echo "⚠️  Docker Compose not found."; \
 	fi
 
-.PHONY: all build run run-headless clean lint test test-backend test-frontend deps build-linux broker-start broker-stop broker-status broker-install broker-auth backup backup-list deb caddy-build services-start services-stop services-logs
+.PHONY: all build run run-headless clean lint test test-backend test-frontend deps build-linux broker-start broker-stop broker-status broker-install broker-auth backup backup-list deb install-deb uninstall-deb caddy-build services-start services-stop services-logs

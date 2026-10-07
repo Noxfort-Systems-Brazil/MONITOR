@@ -1,8 +1,8 @@
 # 🧪 测试规范与质量保证 (QA)
 
-本文档规范 **Noxfort Monitor™ v2.0** 的测试体系，涵盖基于内存 Mock 仓储的自动化单元测试，以及通过 MQTT 和 HTTP REST 进行的手动端到端 (E2E) 验证。
+本文档规范 **Noxfort Monitor™ v2.0** 的测试体系，涵盖基于内存 Mock 仓储的自动化单元测试、通过 MQTT 和 HTTP REST 进行的手动端到端 (E2E) 验证，以及系统可观测性与告警渠道诊断。
 
-⬅️ [文档中心](../README.md) | 🏛️ [系统架构](architecture.md) | 📡 [API 规范](api_reference.md)
+⬅️ [文档中心](README.md) | 🏛️ [系统架构](architecture.md) | 📡 [API 规范](api_reference.md)
 
 ---
 
@@ -61,3 +61,29 @@ curl -X POST http://localhost:22100/api/telemetry \
   }'
 ```
 *预期响应结果*：HTTP `200 OK`，返回 `{"status":"received"}`。
+
+---
+
+## 3. 可观测性与告警渠道诊断
+
+### 3.1 健康探针与指标抓取验证
+```bash
+# 存活探针 (HTTP 200 "OK")
+curl -i http://localhost:22100/healthz
+
+# 深度组件健康诊断 (JSON)
+curl -s http://localhost:22100/api/health | jq .
+
+# Prometheus 格式指标抓取
+curl -s http://localhost:22100/metrics
+```
+
+### 3.2 告警通道即时诊断测试
+按需主动验证通知渠道配置与联通性：
+```bash
+# 测试 SMTP 邮件渠道
+curl -X POST http://localhost:22100/settings/test -H "Cookie: noxfort_session=<token>"
+
+# 测试 Telegram 告警推送
+curl -X POST http://localhost:22100/settings/test-telegram -H "Cookie: noxfort_session=<token>"
+```

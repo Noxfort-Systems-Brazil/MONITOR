@@ -29,14 +29,17 @@
 | 文档 | 领域与范围 | 核心内容 |
 |---|---|---|
 | 📖 **[系统架构核心设计](architecture.md)** | 系统设计蓝图 | 事件驱动架构 (EDA)、Goroutine 高并发模型、SOLID 分层设计及组合根依赖注入机制。 |
-| 📡 **[API 与遥测接入协议](api_reference.md)** | 工业通信协议 | 非阻塞 MQTT 协议摄取 (`:1883`)、REST `POST /api/telemetry` (`:22100`)、统一 JSON 事件规范及管理接口。 |
-| 🗄️ **[双数据库引擎与持久化](database.md)** | 关系数据持久化 | 运行时热切换管理器 (`DBManager`)、PostgreSQL 与免 CGO 的纯 Go SQLite、异构无损数据迁移与 SQL 方言适配。 |
-| 🔐 **[系统安全与 RBAC 控制](security.md)** | 安全与权限体系 | 基于角色的访问控制 (`RoleAdmin` 与 `RoleOperator`)、加盐密码散列、会话凭证及幂等初始化机制。 |
-| 🌐 **[远程访问与 Ngrok 穿透](remote_access.md)** | 广域网边缘穿透 | 基于 Ngrok 的安全反向 TLS 隧道，跨越工业防火墙与运营商 CGNAT，支持固定静态域名。 |
+| 📡 **[API 与遥测接入协议](api_reference.md)** | 工业通信协议 | 非阻塞 MQTT 协议摄取 (`:1883`)、REST `POST /api/telemetry` (`:22100`)、应急响应团队接口、用户注册及系统可观测性。 |
+| 🗄️ **[双数据库引擎与持久化](database.md)** | 关系数据持久化 | 运行时热切换管理器 (`DBManager`)、PostgreSQL 与免 CGO 的纯 Go SQLite、异构无损数据迁移与自动化热备份。 |
+| 🔐 **[系统安全与 RBAC 控制](security.md)** | 安全与权限体系 | 基于角色的访问控制 (`RoleAdmin` 与 `RoleOperator`)、工业级密码复杂度校验、加盐密码散列、会话凭证及安全初始化。 |
+| 🌐 **[远程访问与广域网接入](remote_access.md)** | 广域网边缘穿透 | DuckDNS 动态域名同步、Caddy 自动 HTTPS 终结及 Ngrok 备用反向出站隧道。 |
+| 🛡️ **[Caddy 反向代理与 DuckDNS](caddy_integration.md)** | 边缘接入网关 | 容器化 Caddy 网关、基于 DNS-01 ACME 的全自动证书签发、仪表盘外网隔离及加密 WebSockets (WSS)。 |
 | 🖥️ **[桌面应用与无头守护模式](desktop_app.md)** | 桌面运行与服务 | 基于 Wails v2 与原生 WebKitGTK、Unix IPC 套接字单实例锁、系统托盘及 `--headless` 无头守护模式。 |
 | 🔍 **[审计日志与 SLA 追踪](audit_trail.md)** | 合规可追溯性 | 三重不可变审计流：安全访问审计 (`SecurityAuditLog`)、报警推送 SLA 履约日志 (`AlertDispatchLog`) 及设备停机追踪。 |
-| 🚀 **[生产环境部署指南](deployment.md)** | 运维实施与部署 | 独立 Systemd 无头服务单元、NGINX SSL 反向代理配置及 Debian 原生 `.deb` 安装包制作。 |
-| 🧪 **[测试规范与质量验证](testing.md)** | 质量保证与测试 | 包含 Mock 内存仓储的自动化单元测试套件、基于 `mosquitto_pub` 与 `curl` 的端到端手动验证。 |
+| 🚀 **[生产环境部署指南](deployment.md)** | 运维实施与部署 | 独立 Systemd 无头服务单元、反向代理配置（Caddy 或 NGINX）及 Debian 原生 `.deb` 安装包。 |
+| 🧪 **[测试规范与质量验证](testing.md)** | 质量保证与测试 | 包含 Mock 内存仓储的自动化单元测试套件、端到端手动验证及可观测性接口诊断 (`/healthz`, `/metrics`)。 |
+| 🛠️ **[高级开发者指南](developer_guides.md)** | 构建与功能扩展 | 本地开发环境配置、Wails v2 编译构建、热重载仓储模式、添加新告警通道及代码规范。 |
+| 🔬 **[技术预研与架构决策 (ADR)](research_notes.md)** | 技术选型与演进 | 纯 Go SQLite 选型、DuckDNS + Caddy 广域网方案、Wails v2 桌面设计及未来 gRPC 集群演进路线。 |
 
 ---
 

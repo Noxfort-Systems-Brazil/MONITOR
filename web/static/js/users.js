@@ -107,10 +107,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 3. Add User Form
+    // 3. Add User Form & Password Strength Integration
     const addUserForm = document.getElementById('addUserForm');
     const actionFeedback = document.getElementById('action-feedback');
     const btnAddUser = document.getElementById('btn-add-user');
+    const newPasswordInput = document.getElementById('new_password');
+
+    let userPasswordMeter = null;
+    if (newPasswordInput && window.PasswordStrengthMeter) {
+        userPasswordMeter = window.PasswordStrengthMeter.attach({
+            passwordInput: newPasswordInput,
+            container: addUserForm
+        });
+    }
 
     function showActionAlert(msg, type = 'success') {
         if (!actionFeedback) return;
@@ -124,10 +133,17 @@ document.addEventListener('DOMContentLoaded', () => {
         addUserForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const username = document.getElementById('new_username')?.value.trim();
-            const password = document.getElementById('new_password')?.value;
+            const password = newPasswordInput?.value;
             const role = document.getElementById('new_role')?.value;
 
             if (!username || !password) return;
+
+            if (userPasswordMeter && !userPasswordMeter.isValid()) {
+                const invalidPolicyMsg = window._t ? window._t('password_invalid_policy', 'A senha não atende aos requisitos de segurança obrigatórios.') : 'A senha não atende aos requisitos de segurança obrigatórios.';
+                showActionAlert('❌ ' + invalidPolicyMsg, 'danger');
+                newPasswordInput?.focus();
+                return;
+            }
 
             if (btnAddUser) {
                 btnAddUser.disabled = true;
@@ -150,6 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (res.ok && data.success) {
                     showActionAlert(`✅ Usuário "${username}" criado com sucesso!`, 'success');
                     addUserForm.reset();
+                    if (userPasswordMeter) userPasswordMeter.updateUI();
                     setTimeout(() => window.location.reload(), 1000);
                 } else {
                     showActionAlert('❌ ' + (data.message || (window._t ? window._t('common_error', 'Erro ao cadastrar usuário') : 'Erro ao cadastrar usuário')), 'danger');

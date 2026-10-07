@@ -65,12 +65,46 @@ curl -X POST http://localhost:22100/api/telemetry \
 |---|---|---|---|
 | `/api/auth/login` | `POST` | Публичный | Проверка учетных данных и выдача cookie `noxfort_session`. |
 | `/api/auth/logout` | `POST` | Авториз. | Аннулирование активного токена сессии. |
-| `/api/devices` | `GET` | Оператор+ | Список зарегистрированного оборудования и статус `LastSeen`. |
-| `/api/devices/register` | `POST` | Admin | Регистрация или обновление данных узла. |
+| `/api/auth/status` | `GET` | Публичный | Возвращает статус сессии, имя пользователя и роль. |
+| `/api/auth/register` | `POST` | Admin | Защищенный эндпоинт регистрации с проверкой сложности пароля. |
+| `/devices` | `GET` | Оператор+ | Панель управления зарегистрированным оборудованием и `LastSeen`. |
+| `/devices/delete` | `GET` | Admin | Удаление устройства через query-параметр (`?id=xyz`) с перенаправлением (`303`). |
+| `/contacts` | `GET` | Оператор+ | Панель управления контактами группы реагирования. |
+| `/contacts/create` | `POST` | Admin | Регистрация получателя оповещений (имя, email, телефон, telegram_chat_id, роль). |
+| `/contacts/update` | `POST` | Admin | Обновление контактов и каналов оповещения. |
+| `/contacts/delete` | `POST` | Admin | Удаление контакта из группы реагирования. |
+| `/api/users` | `GET` | Admin | Возвращает JSON-список всех операторов. |
+| `/api/users/create` | `POST` | Admin | Создание учетной записи (требует надежный пароль от 8 символов). |
+| `/api/users/delete` | `POST` | Admin | Удаление учетной записи оператора (суперпользователь защищен). |
+| `/api/settings/database/status` | `GET` | Авториз. | Возвращает активный движок БД (Postgres/SQLite), версию и задержку. |
 | `/api/settings/database/test` | `POST` | Admin | Проверка подключения к PostgreSQL перед переключением. |
-| `/api/settings/database/migrate`| `POST` | Admin | Миграция таблиц между SQLite и PostgreSQL. |
-| `/api/settings/database/save` | `POST` | Admin | Горячее переключение активных репозиториев на целевой движок. |
-| `/api/tunnel/start` | `POST` | Admin | Запуск обратного туннеля Ngrok. |
-| `/api/tunnel/stop` | `POST` | Admin | Остановка туннеля. |
+| `/api/settings/database/save` | `POST` | Admin | Горячее переключение репозиториев на целевой движок (с поддержкой `migrate=true`). |
+| `/api/settings/database/provision-user` | `POST` | Admin | Создание выделенного пользователя со строгими правами в схеме PostgreSQL. |
+| `/api/settings/database/backup` | `POST` | Admin | Создание согласованного горячего снапшота БД (`VACUUM INTO` / `pg_dump`). |
+| `/api/settings/database/backups` | `GET` | Admin | Список всех доступных снапшотов резервных копий в `backups/`. |
+| `/api/tunnel/status` | `GET` | Авториз. | Возвращает статус WAN, провайдера (DuckDNS/Ngrok), публичные URL и IPv6. |
+| `/api/tunnel/save` | `POST` | Admin | Сохранение настроек DuckDNS / Ngrok в базе данных. |
+| `/api/tunnel/start` | `POST` | Admin | Динамическое обновление DNS DuckDNS или запуск туннеля. |
+| `/api/tunnel/stop` | `POST` | Admin | Остановка службы и отключение автозапуска при загрузке. |
+| `/api/tunnel/disconnect` | `POST` | Admin | Отключение учетных данных из БД и завершение работы службы. |
+| `/api/tunnel/test` | `POST` | Admin | Активная проверка токена DuckDNS и разрешения доменных имен. |
 | `/api/audit/security` | `GET` | Admin | Журналы безопасности и попыток авторизации. |
 | `/api/audit/alerts` | `GET` | Admin | Журналы доставки оповещений и соблюдения SLA. |
+| `/api/audit/transitions` | `GET` | Admin | История отказов оборудования и длительности простоев. |
+| `/settings/test` | `POST` | Admin | Отправка тестового email через активную конфигурацию SMTP. |
+| `/settings/test-telegram` | `POST` | Admin | Отправка тестового оповещения MarkdownV2 в Telegram. |
+| `/api/open-external` | `POST` | Авториз. | Открытие URL в браузере по умолчанию операционной системы. |
+| `/api/window/toggle-fullscreen` | `POST` | Публичный | Переключение полноэкранного режима окна Wails. |
+| `/api/window/exit-fullscreen` | `POST` | Публичный | Выход из полноэкранного режима. |
+
+---
+
+## 4. Публичные эндпоинты мониторинга и диагностики
+
+*Доступны без авторизации для мониторинга Prometheus и проб жизнеспособности контейнеров.*
+
+| Эндпоинт | Метод | Описание | Формат |
+|---|---|---|---|
+| `/healthz` | `GET` | Проба liveness (возвращает 200 `OK`). | `text/plain` |
+| `/api/health` | `GET` | Глубокая диагностика компонентов: БД, MQTT, RAM, горутины и количество узлов. | `application/json` |
+| `/metrics` | `GET` | Экспорт метрик в формате **Prometheus** (`noxfort_uptime_seconds`, `noxfort_goroutines` и др.). | `text/plain; version=0.0.4` |

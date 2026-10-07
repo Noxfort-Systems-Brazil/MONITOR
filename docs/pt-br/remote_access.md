@@ -44,7 +44,7 @@ graph TD
 
 1. **DuckDNS + Caddy (Padrão Ativo)**:
    - Sincroniza dinamicamente o subdomínio (`seu-subdominio.duckdns.org`) com o IP público da máquina.
-   - O [Caddy Server](../CADDY_INTEGRATION.md) obtém certificados TLS/SSL válidos automaticamente via desafio **ACME DNS-01** (sem exigir porta 80 aberta).
+   - O [Caddy Server](caddy_integration.md) obtém certificados TLS/SSL válidos automaticamente via desafio **ACME DNS-01** (sem exigir porta 80 aberta).
    - Centraliza o tráfego externo nas portas padrão 80 e 443.
 2. **Túnel Ngrok (Alternativa para CGNAT Estrito)**:
    - Estabelece conexão de saída TLS criptografada para ambientes onde não há permissão para redirecionamento de portas no roteador.

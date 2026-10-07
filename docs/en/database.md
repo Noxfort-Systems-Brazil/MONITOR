@@ -62,3 +62,22 @@ When switching between SQLite and PostgreSQL, `MigrateData()` guarantees zero da
 2. Extracts devices, contacts, users, settings, and telemetry history.
 3. Performs upsert operations using `storage.AdaptQuery()` to resolve dialect differences (`ON CONFLICT (id) DO UPDATE`).
 4. Re-points all repositories to the destination database and persists the new configuration to disk.
+
+---
+
+## 4. Automated Hot Backups & Retention Strategy
+
+Noxfort Monitor features a zero-downtime database snapshot engine implemented in [`internal/storage/backup.go`](../../internal/storage/backup.go):
+
+### 4.1 Non-Blocking Hot Snapshots
+* **SQLite Mode**: Executes the atomic SQL command `VACUUM INTO '<destination_path>'`. This copies the active database safely into a clean `.db` snapshot on disk without blocking active write or read transactions.
+* **PostgreSQL Mode**: Uses `pg_dump` with custom binary compression (`-F c`) to create an encrypted, restorable snapshot.
+
+### 4.2 File Retention & Rotation Policy
+* Backups are saved to `backups/monitor_<driver>_YYYYMMDD_HHMMSS.<ext>` with owner-only permissions (`0600`).
+* Automatically retains the latest 7 daily snapshots.
+
+### 4.3 Invocation Interfaces
+* **Makefile**: `make backup` and `make backup-list`.
+* **Automated Script**: [`scripts/backup.sh`](../../scripts/backup.sh).
+* **REST API**: `POST /api/settings/database/backup` and `GET /api/settings/database/backups`.

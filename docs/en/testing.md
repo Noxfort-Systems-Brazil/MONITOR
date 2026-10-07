@@ -61,3 +61,29 @@ curl -X POST http://localhost:22100/api/telemetry \
   }'
 ```
 *Expected response*: HTTP `200 OK` with body `{"status":"received"}`.
+
+---
+
+## 3. Observability & Channel Diagnostics
+
+### 3.1 Health Check & Metrics Validation
+```bash
+# Liveness probe (HTTP 200 "OK")
+curl -i http://localhost:22100/healthz
+
+# Deep component health diagnostics (JSON)
+curl -s http://localhost:22100/api/health | jq .
+
+# Prometheus metrics scrape
+curl -s http://localhost:22100/metrics
+```
+
+### 3.2 Notification Channel Diagnostics
+Verify configured notification channels on demand:
+```bash
+# Test Email (SMTP)
+curl -X POST http://localhost:22100/settings/test -H "Cookie: noxfort_session=<token>"
+
+# Test Telegram Bot
+curl -X POST http://localhost:22100/settings/test-telegram -H "Cookie: noxfort_session=<token>"
+```

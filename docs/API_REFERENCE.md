@@ -111,6 +111,12 @@ Returns the authentication state of the current session.
   }
   ```
 
+### 3.4 `POST /api/auth/register`
+Protected registration endpoint. Functions as a secure alias for `/api/users/create`, strictly requiring `RoleAdmin` authentication.
+* **Format**: Form URL-encoded or JSON (`username`, `password`, optional `role`).
+* **Validation**: Enforces industrial password complexity via [`ValidatePasswordComplexity`](../internal/security/password_validator.go) (minimum 8 characters, digit, upper, lower, special character).
+* **Failure (`400 Bad Request`)**: Returns validation error if password complexity criteria are unmet.
+
 ---
 
 ## 4. Operator Account Management (`/api/users`)
@@ -120,16 +126,41 @@ Returns the authentication state of the current session.
 | Method | Route | Description | Parameters / Body |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/users` | Lists all registered operators. | - |
-| `POST` | `/api/users/create` | Creates a new operator or administrator. | `username`, `password`, `role` (`ADMIN` or `OPERATOR`) |
-| `POST` | `/api/users/delete` | Deletes the specified user account. | `username` (Query or Form) |
+| `POST` | `/api/users/create` | Creates a new operator or administrator. Enforces password complexity. | `username`, `password`, `role` (`ADMIN` or `OPERATOR`) |
+| `POST` | `/api/users/delete` | Deletes the specified user account (superuser is protected). | `username` (Query or Form) |
 
 ---
 
-## 5. Remote Access & WAN Tunnel API (`/api/tunnel`)
+## 5. Response Team & Incident Contacts (`/contacts`)
+
+Incident alert dispatching routes (Email & Telegram) are managed via the contacts interface:
+
+| Method | Route | Role | Description | Parameters / Body |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/contacts` | Operator+ | Renders the Response Team management interface. | - |
+| `POST` | `/contacts/create` | Admin | Adds a new alert recipient. | `name`, `email`, `phone`, `role` (`TECHNICIAN`, `PROGRAMMER`, `ADMIN`), `notify_critical` (`on`), `telegram_chat_id` |
+| `POST` | `/contacts/update` | Admin | Updates an existing contact record. | `id` (int), `name`, `email`, `phone`, `role`, `notify_critical`, `telegram_chat_id` |
+| `POST` | `/contacts/delete` | Admin | Removes an alert recipient. | `id` (int) |
+
+---
+
+## 6. Monitored Equipment & System Registry (`/devices`)
+
+Manages field nodes, edge devices, and telemetry sources:
+
+| Method | Route | Role | Description | Parameters / Query |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/devices` | Operator+ | Renders the system management dashboard with all registered devices, telemetry status, and `last_seen` timestamps. | - |
+| `GET` | `/devices/delete` | Admin | Removes a device from monitoring and redirects (`303`) to `/devices`. | `id` (string, e.g. `?id=sensor-node-01`) |
+| `POST` | `/api/telemetry` | Public | Autonomous telemetry ingestion for field agents. See [Section 2](#2-telemetry-ingestion-via-http-rest). | Universal `IncomingEvent` JSON payload. |
+
+---
+
+## 7. Remote Access & WAN Tunnel API (`/api/tunnel`)
 
 Refer to [Remote Access & WAN Ingestion](REMOTE_ACCESS.md) for conceptual and setup details.
 
-### 5.1 `GET /api/tunnel/status`
+### 7.1 `GET /api/tunnel/status`
 Returns real-time WAN ingestion status, active provider, public endpoints, and connection parameters:
 ```json
 {
@@ -147,7 +178,7 @@ Returns real-time WAN ingestion status, active provider, public endpoints, and c
 }
 ```
 
-### 5.2 Additional Tunnel Endpoints:
+### 7.2 Additional Tunnel Endpoints:
 * `POST /api/tunnel/save`: Persists WAN configuration. Supports DuckDNS (`duckdns_token`, `duckdns_domain`, `duckdns_enabled`) and Ngrok parameters.
 * `POST /api/tunnel/start`: Triggers dynamic DNS update or opens reverse tunnel on demand.
 * `POST /api/tunnel/stop`: Terminates the active tunnel or pauses DuckDNS auto-updates on boot.
@@ -166,11 +197,11 @@ Returns real-time WAN ingestion status, active provider, public endpoints, and c
 
 ---
 
-## 6. Database & Server Config (`/api/settings/database`)
+## 8. Database & Server Config (`/api/settings/database`)
 
 Refer to [Database & Dual-Engine Persistence](DATABASE.md).
 
-### 6.1 `GET /api/settings/database/status`
+### 8.1 `GET /api/settings/database/status`
 Returns the active database engine and query latency:
 ```json
 {
@@ -188,16 +219,16 @@ Returns the active database engine and query latency:
 }
 ```
 
-### 6.2 `POST /api/settings/database/test`
+### 8.2 `POST /api/settings/database/test`
 Tests connectivity with supplied parameters without altering the active production database connection.
 
-### 6.3 `POST /api/settings/database/save`
+### 8.3 `POST /api/settings/database/save`
 Applies new credentials to the [`DBManager`](../internal/storage/db_manager.go). If `migrate=true` is passed, runs data synchronization prior to switching the driver.
 
-### 6.4 `POST /api/settings/database/provision-user`
+### 8.4 `POST /api/settings/database/provision-user`
 Provisions a dedicated schema-restricted user using PostgreSQL administrative credentials.
 
-### 6.5 `POST /api/settings/database/backup`
+### 8.5 `POST /api/settings/database/backup`
 Triggers an immediate, non-blocking hot database backup:
 * **SQLite**: Executes `VACUUM INTO` to produce a consistent binary `.db` snapshot in `backups/`.
 * **PostgreSQL**: Invokes `pg_dump` with custom compression.
@@ -217,12 +248,12 @@ Triggers an immediate, non-blocking hot database backup:
   }
   ```
 
-### 6.6 `GET /api/settings/database/backups`
+### 8.6 `GET /api/settings/database/backups`
 Returns an array of all available backup files sorted by creation date descending.
 
 ---
 
-## 7. Audit Trail (`/api/audit`)
+## 9. Audit Trail (`/api/audit`)
 
 Refer to [Audit Trail](AUDIT_TRAIL.md).
 
@@ -232,7 +263,7 @@ Refer to [Audit Trail](AUDIT_TRAIL.md).
 
 ---
 
-## 8. Notification Channel Diagnostics
+## 10. Notification Channel Diagnostics
 
 Endpoints used to dispatch verification alerts on demand:
 * `POST /settings/test`: Sends a test email using the active SMTP settings.
@@ -240,7 +271,7 @@ Endpoints used to dispatch verification alerts on demand:
 
 ---
 
-## 9. Desktop and Browser Controls
+## 11. Desktop and Browser Controls
 
 * `POST /api/open-external`: Accepts `{"url": "https://..."}` and directs the operating system to open the link in the user's default browser (`xdg-open` on Linux).
 * `POST /api/window/toggle-fullscreen`: Toggles the Wails window between fullscreen and normal mode.
@@ -248,14 +279,14 @@ Endpoints used to dispatch verification alerts on demand:
 
 ---
 
-## 10. Observability & Application Diagnostics
+## 12. Observability & Application Diagnostics
 
 Noxfort Monitor provides public diagnostic and metrics endpoints for infrastructure monitoring, container health probes, and Prometheus scrapers (exempt from authentication middleware):
 
-### 10.1 `GET /healthz`
+### 12.1 `GET /healthz`
 Liveness probe endpoint. Responds with `200 OK` and payload `"OK\n"` when the HTTP server is alive and accepting traffic.
 
-### 10.2 `GET /api/health`
+### 12.2 `GET /api/health`
 Deep diagnostic health endpoint returning component connectivity, memory statistics, and process metadata.
 * **Success (`200 OK`)**: System is `healthy` or `degraded`.
 * **Service Unavailable (`503 Service Unavailable`)**: Critical components (active database) are offline.
@@ -290,7 +321,7 @@ Deep diagnostic health endpoint returning component connectivity, memory statist
   }
   ```
 
-### 10.3 `GET /metrics`
+### 12.3 `GET /metrics`
 Prometheus metrics exporter endpoint in text exposition format (`version 0.0.4`):
 ```promql
 # HELP noxfort_uptime_seconds Application uptime in seconds.

@@ -68,10 +68,23 @@ curl -X POST http://localhost:22100/api/telemetry \
 |---|---|---|---|
 | `/api/auth/login` | `POST` | Public | Authenticates credentials and issues `noxfort_session` cookie. |
 | `/api/auth/logout` | `POST` | Authenticated | Invalidates the active session token. |
-| `/api/devices` | `GET` | Operator+ | Returns registered devices and `LastSeen` status. |
-| `/api/devices/delete` | `POST` | Admin | Removes a device from monitoring. |
+| `/api/auth/status` | `GET` | Public | Returns session authentication state, username, and role. |
+| `/api/auth/register` | `POST` | Admin | Protected account creation alias enforcing industrial password complexity. |
+| `/devices` | `GET` | Operator+ | Renders system management dashboard with registered nodes and `LastSeen` status. |
+| `/devices/delete` | `GET` | Admin | Removes a device via query parameter (`?id=xyz`) and redirects (`303`). |
+| `/contacts` | `GET` | Operator+ | Renders the Response Team management interface. |
+| `/contacts/create` | `POST` | Admin | Registers a new alert recipient (name, email, phone, telegram_chat_id, role). |
+| `/contacts/update` | `POST` | Admin | Updates contact information and notification channels. |
+| `/contacts/delete` | `POST` | Admin | Removes an alert recipient from the response team. |
+| `/api/users` | `GET` | Admin | Returns JSON array of all registered operators. |
+| `/api/users/create` | `POST` | Admin | Provisions operator/admin account (enforces password complexity). |
+| `/api/users/delete` | `POST` | Admin | Deletes an operator account (superuser cannot be removed). |
+| `/api/settings/database/status` | `GET` | Authenticated | Returns active database engine, latency, and schema status. |
 | `/api/settings/database/test` | `POST` | Admin | Tests target PostgreSQL credentials before switching. |
 | `/api/settings/database/save` | `POST` | Admin | Hot-reloads active repositories with target engine (`migrate=true` supported). |
+| `/api/settings/database/provision-user` | `POST` | Admin | Provisions a schema-restricted dedicated user in PostgreSQL. |
+| `/api/settings/database/backup` | `POST` | Admin | Triggers a non-blocking hot database snapshot (`VACUUM INTO` / `pg_dump`). |
+| `/api/settings/database/backups` | `GET` | Admin | Lists all available backup snapshots in `backups/`. |
 | `/api/tunnel/status` | `GET` | Authenticated | Returns state, provider (DuckDNS/Ngrok), public URLs, and IPv6. |
 | `/api/tunnel/save` | `POST` | Admin | Persists DuckDNS / Ngrok parameters in database. |
 | `/api/tunnel/start` | `POST` | Admin | Triggers dynamic DNS update or opens tunnel. |
@@ -81,3 +94,20 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/audit/security` | `GET` | Admin | Queries administrative security access logs. |
 | `/api/audit/alerts` | `GET` | Admin | Queries alert dispatch SLA logs. |
 | `/api/audit/transitions` | `GET` | Admin | Queries device failure/recovery transitions and downtimes. |
+| `/settings/test` | `POST` | Admin | Sends a test email using active SMTP configuration. |
+| `/settings/test-telegram` | `POST` | Admin | Sends a MarkdownV2 test alert to configured Telegram bot and chat ID. |
+| `/api/open-external` | `POST` | Authenticated | Directs operating system to open target URL in default browser. |
+| `/api/window/toggle-fullscreen` | `POST` | Public | Toggles Wails window between fullscreen and normal mode. |
+| `/api/window/exit-fullscreen` | `POST` | Public | Exits fullscreen mode. |
+
+---
+
+## 4. Public Observability & Application Diagnostics
+
+*Exempt from authentication middleware to allow container health checks and Prometheus scraping.*
+
+| Endpoint | Method | Description | Format |
+|---|---|---|---|
+| `/healthz` | `GET` | Liveness probe returning `200 OK` (`"OK\n"`). | `text/plain` |
+| `/api/health` | `GET` | Deep diagnostic probe: database status & latency, MQTT broker connectivity, RAM allocation, goroutines, and device count. | `application/json` |
+| `/metrics` | `GET` | **Prometheus** metrics export (`noxfort_uptime_seconds`, `noxfort_goroutines`, `noxfort_db_status`, `noxfort_mqtt_connected`). | `text/plain; version=0.0.4` |

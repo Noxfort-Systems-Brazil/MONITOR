@@ -19,12 +19,29 @@ O Noxfort Monitor implementa segregação rígida de privilégios:
 
 ---
 
-## 2. Hash Criptográfico de Senhas e Sal Único
+## 2. Hash Criptográfico e Política de Senhas
 
+### 2.1 Armazenamento Criptográfico e Sal Único
 As senhas são protegidas por derivação SHA-256 com sal criptográfico em `internal/security/hasher.go`:
-* Sal aleatório de 16 bytes gerado individualmente por usuário.
+* Sal aleatório de 16 bytes gerado individualmente por usuário (`crypto/rand`).
 * Senhas e hashes são estritamente excluídos da serialização JSON (`json:"-"`).
 * Comparação em tempo constante para evitar ataques de temporização (*timing attacks*).
+
+### 2.2 Política Industrial de Complexidade de Senhas (`password_validator.go`)
+Para proteger sistemas críticos de automação contra ataques de força bruta, o validador [`internal/security/password_validator.go`](../../internal/security/password_validator.go) exige conformidade obrigatória via `ValidatePasswordComplexity()`:
+* **Comprimento Mínimo**: No mínimo 8 caracteres.
+* **Dígito Numérico**: Ao menos um número (`0-9`).
+* **Letra Maiúscula**: Ao menos uma letra maiúscula (`A-Z`).
+* **Letra Minúscula**: Ao menos uma letra minúscula (`a-z`).
+* **Caractere Especial**: Ao menos um caractere especial (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\§¬¢£`).
+
+Tentativas de cadastro ou criação de usuários sem esses critérios resultam em erro HTTP `400 Bad Request`.
+
+### 2.3 Medidor Dinâmico de Força de Senha (`password_meter.js`)
+As telas de login, primeiro acesso e gerenciamento de usuários incluem verificação em tempo real ([`web/static/js/password_meter.js`](../../web/static/js/password_meter.js)):
+* Avaliação de entropia e pontuação de 0 a 4 conforme a digitação.
+* Checklist interativo dos 5 requisitos de segurança com feedback visual imediato.
+* Bloqueio preventivo de envio de formulário caso a senha seja vulnerável.
 
 ---
 
@@ -67,10 +84,19 @@ sequenceDiagram
 
 No boot do sistema, o validador inspeciona a integridade das configurações locais:
 * **Restrição Automática de Permissões (`0600`)**: Em ambientes Linux, restringe o arquivo `.env` para leitura exclusiva pelo proprietário caso esteja acessível publicamente.
-* **Detecção de Senhas Fracas**: Emite alerta crítico caso `admin/admin` permaneça ativo em produção.
+* **Detecção de Senhas Fracas**: Emite alerta crítico caso as credenciais padrão de superusuário (`admin` / `Admin@Noxfort2026!`) permaneçam ativas em produção.
+* **Checagem de Credenciais MQTT**: Alerta caso `MQTT_USER` ou `MQTT_PASSWORD` estejam ausentes antes de iniciar o broker.
 
 ---
 
-## 6. Prevenção de Vazamento de Segredos no CI/CD
+## 6. Bootstrap Idempotente do Superusuário (`superuser.go`)
+
+Na inicialização, o sistema verifica as variáveis `MONITOR_ADMIN_USER` e `MONITOR_ADMIN_PASSWORD`:
+* Se nenhuma conta de administrador existir, uma conta `ADMIN` é provisionada automaticamente.
+* Caso credenciais customizadas sejam informadas em produção, a conta de teste padrão é purgada automaticamente para prevenir backdoors.
+
+---
+
+## 7. Prevenção de Vazamento de Segredos no CI/CD
 
 O workflow automatizado do GitHub Actions ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)) audita todo commit para impedir o versionamento de arquivos `.env`, chaves privadas (`*.pem`, `*.key`) ou senhas do Mosquitto.

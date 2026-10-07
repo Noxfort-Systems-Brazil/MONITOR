@@ -34,16 +34,20 @@ Migrated to **Wails v2** ([`docs/DESKTOP_APP.md`](DESKTOP_APP.md)):
 
 ---
 
-## 3. WAN Connectivity: Reverse Tunnel Integration (Ngrok)
+## 3. WAN Connectivity: DuckDNS + Caddy Edge Gateway vs Ngrok Tunnel
 
 ### Context
-Sensors at remote branches, vehicle-mounted nodes, and edge agents (such as **Synapse** and **Carina**) operate outside the central Monitor server's local subnet. Inbound port forwarding on industrial routers is prohibited under cybersecurity governance standards (e.g., ISA/IEC 62443).
+Industrial edge agents (**Synapse**, **Carina**) and remote IoT nodes operate across WAN boundaries outside the server's local subnet. Initially, Monitor relied on **Ngrok** outbound tunnels to bypass CGNAT and strict router firewalls. However, free-tier tunnel services introduce bandwidth constraints, session timeouts, and dependencies on third-party cloud intermediaries.
 
 ### Decision
-Integrated the [`internal/tunnel`](REMOTE_ACCESS.md) subsystem:
-* Monitor establishes an outbound TLS connection to the Ngrok cloud.
-* Remote clients transmit data to a stable domain (e.g., `https://your-monitor.ngrok-free.app/api/telemetry`).
-* The user interface automatically adapts suggested telemetry endpoints.
+Evolved the [`internal/tunnel`](REMOTE_ACCESS.md) and [`caddy/`](CADDY_INTEGRATION.md) subsystems into a dual-connectivity architecture:
+1. **DuckDNS Dynamic DNS + Containerized Caddy (Primary / Recommended)**:
+   * Native Go updater dynamically synchronizes public IPv4 and IPv6 addresses with DuckDNS.
+   * Containerized Caddy acts as an automated edge gateway executing **ACME DNS-01 challenges** against the DuckDNS API.
+   * Eliminates the requirement to open port 80 for TLS validation while terminating encrypted traffic on standard port 443.
+   * Proxies telemetry to `POST /api/telemetry` on port 22100 and exposes encrypted WebSockets (`wss://domain.duckdns.org/mqtt`) for Mosquitto.
+2. **Ngrok Reverse Tunnel (Fallback / Zero-Forwarding)**:
+   * Retained as a secondary, zero-configuration driver for installations behind restrictive carrier-grade NAT (CGNAT) where inbound ports cannot be opened.
 
 ---
 

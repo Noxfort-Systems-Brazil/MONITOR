@@ -134,7 +134,7 @@ sudo dpkg -i build_deb/noxfort-monitor_2.0.1_amd64.deb
 * **Operator Interface**: Accessible exclusively via the native desktop application window. (Direct web browser access over external HTTP ports is disabled with HTTP 403 Forbidden; external port `22100` serves `POST /api/telemetry` for IoT nodes).
 * **First-Access Default Credentials**: If no `.env` file is present, the default bootstrap credentials for logging into the desktop application are:
   * **Username**: `admin`
-  * **Password**: `admin`
+  * **Password**: `Admin@Noxfort2026!`
 * **Production Configuration**: Copy `.env.example` to `.env` and set strong administrator credentials before deployment:
   ```bash
   cp .env.example .env

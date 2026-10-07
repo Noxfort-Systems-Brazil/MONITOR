@@ -59,12 +59,29 @@ sequenceDiagram
 
 ---
 
-## 3. Cryptography & Password Storage
+## 3. Cryptography & Password Policy
 
+### 3.1 Cryptographic Storage & Salting
 The [`internal/security/hasher.go`](../internal/security/hasher.go) module encapsulates cryptographic key derivation:
 * **Random Cryptographic Salt**: Every password generated receives an exclusive salt via `crypto/rand`.
 * **Protected Storage**: The resulting hash stores algorithm identifiers, cost, salt, and final hash encoded in secure Base64.
 * **Serialization Safety**: The [`domain.User`](../internal/domain/user.go) entity defines `json:"-"` on the `PasswordHash` field, guaranteeing password hashes are **never exposed** in any API JSON responses.
+
+### 3.2 Industrial Password Complexity Policy (`password_validator.go`)
+To protect against brute-force attacks in industrial operational environments, [`internal/security/password_validator.go`](../internal/security/password_validator.go) enforces mandatory complexity standards via `ValidatePasswordComplexity()`:
+* **Minimum Length**: At least 8 characters.
+* **Numeric Digit**: At least one digit (`0-9`).
+* **Uppercase Letter**: At least one uppercase letter (`A-Z`).
+* **Lowercase Letter**: At least one lowercase letter (`a-z`).
+* **Special Character**: At least one symbol (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\§¬¢£`).
+
+Any attempt to register or provision a user account violating these rules returns an immediate HTTP `400 Bad Request` with a descriptive error message.
+
+### 3.3 Dynamic Password Strength Meter (`password_meter.js`)
+The user management and account creation interfaces integrate an interactive real-time validation meter ([`web/static/js/password_meter.js`](../web/static/js/password_meter.js)):
+* Provides live client-side feedback during typing.
+* Renders visual indicators (Weak, Medium, Strong) and requirement checklists.
+* Prevents form submission until all industrial security criteria are fulfilled.
 
 ---
 
@@ -74,7 +91,7 @@ To streamline initial deployments without compromising security, the system exec
 
 1. The system inspects environment variables:
    * `MONITOR_ADMIN_USER` (development default: `admin`)
-   * `MONITOR_ADMIN_PASSWORD` (development default: `admin`)
+   * `MONITOR_ADMIN_PASSWORD` (development default: `Admin@Noxfort2026!`)
 2. If no administrative account exists in the active database (SQLite or PostgreSQL), the account is provisioned automatically with role `ADMIN`.
 3. If administrators already exist in the database, the system will not overwrite existing credentials unless explicitly configured.
 
@@ -125,16 +142,21 @@ Configured on the network listening socket in [`internal/transport/http/server.g
 
 ### 5.2 Internal Desktop Handler & RBAC (`DesktopHandler`)
 Configured in [`internal/transport/http/routes.go`](../internal/transport/http/routes.go) and mounted exclusively into the native Wails application:
-1. **Exempt Public Routes**:
+1. **Exempt Public Routes** (`isPublicPath`):
    * Static assets: `/static/*`
-   * Authentication endpoints: `/login`, `/register`, `/api/auth/login`, `/api/auth/status`
+   * Authentication endpoints: `/login`, `/api/auth/login`, `/api/auth/status`
+   * Observability & Probes: `/healthz`, `/api/health`, `/metrics`
    * Telemetry ingestion: `POST /api/telemetry`
-2. **Unauthenticated Desktop Webview Requests**:
+   * Desktop window controls & URL opener: `/api/window/*`, `/api/open-external`
+2. **Registration Protection & Workflow**:
+   * **Route `/register`**: Self-registration is disabled in industrial environments. Unauthenticated visitors accessing `/register` are redirected with HTTP `303 See Other` to `/login`. If an active administrator visits `/register`, they are redirected to the management panel at `/users`.
+   * **API Endpoint `/api/auth/register`**: Serves as a protected alias for `/api/users/create`. It strictly requires `RoleAdmin` privileges and enforces industrial password complexity.
+3. **Unauthenticated Desktop Webview Requests**:
    * Window navigations such as `GET /`, `GET /devices`, or `GET /settings` without a valid session redirect with HTTP `303 See Other` to `/login`.
-3. **Unauthenticated API Requests**:
-   * Requests without a valid session token return HTTP `401 Unauthorized`.
-4. **Privilege Enforcement (RBAC)**:
-   * Sensitive endpoints (e.g., `/api/users/create`, `/api/settings/database/save`, `/api/tunnel/save`) strictly require `role == RoleAdmin`. Attempts by standard operators return HTTP `403 Forbidden`.
+4. **Unauthenticated API Requests**:
+   * Protected API requests lacking a valid session token return HTTP `401 Unauthorized`.
+5. **Privilege Enforcement (RBAC)**:
+   * Sensitive endpoints (e.g., `/api/users/create`, `/api/auth/register`, `/api/settings/database/save`, `/api/tunnel/save`, `/contacts/delete`) strictly require `role == RoleAdmin`. Attempts by standard operators return HTTP `403 Forbidden`.
 
 ---
 
@@ -160,7 +182,7 @@ In industrial environments, unauthenticated telemetry streams expose the operati
 To mitigate operational risks on local workstations and servers, [`internal/security/env_validator.go`](../internal/security/env_validator.go) executes automated security validation at every application boot:
 
 * **File Permission Enforcement (`0600`)**: On POSIX/Linux systems, the validator checks the file mode of `.env`. If it detects group or world readability (`perm & 0077 != 0`), it immediately logs a security warning and automatically restricts the file mode to `0600` (readable and writable only by the owner).
-* **Weak Credential Alerts**: If administrative variables (`MONITOR_ADMIN_USER` / `MONITOR_ADMIN_PASSWORD`) are left at default (`admin`/`admin`), a high-priority `[SECURITY] CRITICAL WARNING` is logged.
+* **Weak Credential Alerts**: If administrative variables (`MONITOR_ADMIN_USER` / `MONITOR_ADMIN_PASSWORD`) are left at default (`admin`/`Admin@Noxfort2026!`), a high-priority `[SECURITY] CRITICAL WARNING` is logged.
 * **MQTT Credential Check**: Warns if `MQTT_USER` or `MQTT_PASSWORD` are missing before establishing broker connectivity.
 
 ---

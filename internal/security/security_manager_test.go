@@ -89,7 +89,7 @@ func TestSingleAdminRuleAndOperator(t *testing.T) {
 	sm := NewSecurityManager(repo)
 
 	// First registration: must be ADMIN
-	u1, err := sm.Register("superadmin", "strongpass1")
+	u1, err := sm.Register("superadmin", "StrongPass@2026_1")
 	if err != nil {
 		t.Fatalf("Failed to register first user: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSingleAdminRuleAndOperator(t *testing.T) {
 	}
 
 	// Second registration: must be OPERATOR ("super somente ter um")
-	u2, err := sm.Register("operator1", "strongpass2")
+	u2, err := sm.Register("operator1", "StrongPass@2026_2")
 	if err != nil {
 		t.Fatalf("Failed to register second user: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestSingleAdminRuleAndOperator(t *testing.T) {
 	}
 
 	// Third registration: also OPERATOR
-	u3, err := sm.Register("operator2", "strongpass3")
+	u3, err := sm.Register("operator2", "StrongPass@2026_3")
 	if err != nil {
 		t.Fatalf("Failed to register third user: %v", err)
 	}
@@ -126,10 +126,10 @@ func TestAuthenticationFlow(t *testing.T) {
 	repo := newMockUserRepo()
 	sm := NewSecurityManager(repo)
 
-	_, _ = sm.Register("admin_user", "password123")
+	_, _ = sm.Register("admin_user", "AdminPassword@2026")
 
 	// Successful authentication
-	user, err := sm.Authenticate("admin_user", "password123")
+	user, err := sm.Authenticate("admin_user", "AdminPassword@2026")
 	if err != nil || user == nil {
 		t.Fatalf("Expected authentication to succeed, got %v", err)
 	}
@@ -138,13 +138,13 @@ func TestAuthenticationFlow(t *testing.T) {
 	}
 
 	// Wrong password
-	_, err = sm.Authenticate("admin_user", "wrongpassword")
+	_, err = sm.Authenticate("admin_user", "WrongPassword@2026")
 	if err == nil {
 		t.Fatalf("Expected authentication to fail on wrong password")
 	}
 
 	// Non-existent user
-	_, err = sm.Authenticate("ghost", "password123")
+	_, err = sm.Authenticate("ghost", "AdminPassword@2026")
 	if err == nil {
 		t.Fatalf("Expected authentication to fail for non-existent user")
 	}
@@ -154,9 +154,9 @@ func TestAdminProtectionFromDeletion(t *testing.T) {
 	repo := newMockUserRepo()
 	sm := NewSecurityManager(repo)
 
-	_, _ = sm.RegisterWithRole(SuperuserUsername, "pass1", domain.RoleAdmin)
-	_, _ = sm.RegisterWithRole("worker", "pass2", domain.RoleOperator)
-	_, _ = sm.RegisterWithRole("a", "pass3", domain.RoleAdmin)
+	_, _ = sm.RegisterWithRole(SuperuserUsername, "AdminPass@2026_1", domain.RoleAdmin)
+	_, _ = sm.RegisterWithRole("worker", "WorkerPass@2026_2", domain.RoleOperator)
+	_, _ = sm.RegisterWithRole("a", "AdminPass@2026_3", domain.RoleAdmin)
 
 	// Attempt to delete superuser must fail
 	err := sm.DeleteUser(SuperuserUsername)
@@ -235,7 +235,7 @@ func TestRegisterWithRole(t *testing.T) {
 	repo := newMockUserRepo()
 	sm := NewSecurityManager(repo)
 
-	op, err := sm.RegisterWithRole("operator_direct", "password123", domain.RoleOperator)
+	op, err := sm.RegisterWithRole("operator_direct", "OperatorPass@2026", domain.RoleOperator)
 	if err != nil {
 		t.Fatalf("RegisterWithRole failed: %v", err)
 	}
@@ -243,12 +243,33 @@ func TestRegisterWithRole(t *testing.T) {
 		t.Fatalf("Expected role %s, got %s", domain.RoleOperator, op.Role)
 	}
 
-	admin, err := sm.RegisterWithRole("admin_direct", "password123", domain.RoleAdmin)
+	admin, err := sm.RegisterWithRole("admin_direct", "AdminPass@2026", domain.RoleAdmin)
 	if err != nil {
 		t.Fatalf("RegisterWithRole failed: %v", err)
 	}
 	if admin.Role != domain.RoleAdmin {
 		t.Fatalf("Expected role %s, got %s", domain.RoleAdmin, admin.Role)
+	}
+}
+
+func TestRegisterPasswordComplexityRejection(t *testing.T) {
+	repo := newMockUserRepo()
+	sm := NewSecurityManager(repo)
+
+	insecurePasswords := []string{
+		"1234",
+		"short1!",
+		"alllowercase1!",
+		"ALLUPPERCASE1!",
+		"NoSpecialChar123",
+		"NoNumber!@#Abc",
+	}
+
+	for _, pwd := range insecurePasswords {
+		_, err := sm.Register("user_"+pwd, pwd)
+		if err == nil {
+			t.Fatalf("Expected registration with insecure password %q to fail, but succeeded", pwd)
+		}
 	}
 }
 

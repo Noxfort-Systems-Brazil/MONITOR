@@ -32,11 +32,14 @@ This directory contains the canonical **English** technical documentation suite 
 | 📡 **[API & Ingestion Protocols](api_reference.md)** | Ingestion Specifications | Non-blocking MQTT ingestion (`:1883`), HTTP REST `POST /api/telemetry` (`:22100`), universal `IncomingEvent` JSON schema, and management APIs. |
 | 🗄️ **[Dual-Engine Persistence](database.md)** | Database Subsystem | Live connection hot-reload via `DBManager`, PostgreSQL & CGO-free pure-Go SQLite, automatic data migrator, and dialect query adapters. |
 | 🔐 **[Security & RBAC](security.md)** | Authentication & Security | Role-Based Access Control (`RoleAdmin`, `RoleOperator`), salted password hashing, thread-safe session cookies, and idempotent superuser bootstrapping. |
-| 🌐 **[Remote Access & Ngrok](remote_access.md)** | WAN Reverse Tunnel | Reverse tunneling through industrial firewalls & CGNAT, stable static domains, and telemetry forwarding for remote agents. |
+| 🌐 **[Remote Access (DuckDNS & Ngrok)](remote_access.md)** | WAN Reverse Tunnel | Dynamic DNS synchronization via DuckDNS, reverse tunneling via Ngrok across industrial firewalls & CGNAT, and remote telemetry forwarding. |
+| 🛡️ **[Caddy Reverse Proxy & DuckDNS](caddy_integration.md)** | Automated HTTPS Gateway | Enterprise TLS/SSL termination with DNS-01 ACME challenge, port 443 standardization, and encrypted WebSockets (`/mqtt`). |
 | 🖥️ **[Desktop App & Headless](desktop_app.md)** | UI & Operations | Wails v2 + native WebKitGTK runtime, Unix IPC single-instance socket lock, system tray lifecycle, and `--headless` server daemon mode. |
 | 🔍 **[Audit Trail & SLA](audit_trail.md)** | Compliance & Observability | Triple audit model: security access logs (`SecurityAuditLog`), alert delivery SLA tracking (`AlertDispatchLog`), and downtime monitoring. |
-| 🚀 **[Production Deployment](deployment.md)** | DevOps & Production | Standalone systemd headless daemon, NGINX SSL reverse proxy configuration, and native Debian `.deb` installer packaging. |
+| 🚀 **[Production Deployment](deployment.md)** | DevOps & Production | Standalone systemd headless daemon, NGINX/Caddy reverse proxy configuration, and native Debian `.deb` installer packaging. |
 | 🧪 **[Testing & QA](testing.md)** | Quality Assurance | Automated Go unit tests with repository mocks, manual verification with `mosquitto_pub` / `curl`, and notification diagnostics. |
+| 👨‍💻 **[Advanced Developer Guide](developer_guides.md)** | Engineering & Extensibility | Local setup, SOLID conventions, reloadable repository patterns (`DBManager`), custom notification channels, and entities. |
+| 🔬 **[Research Notes & Technical Decisions](research_notes.md)** | Architectural Records (ADRs) | Architecture decision log: pure-Go SQLite migration, Wails v2, DuckDNS/Caddy reverse proxy, and gRPC clustering roadmap. |
 
 ---
 

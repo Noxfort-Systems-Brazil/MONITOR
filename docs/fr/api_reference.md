@@ -65,12 +65,46 @@ curl -X POST http://localhost:22100/api/telemetry \
 |---|---|---|---|
 | `/api/auth/login` | `POST` | Public | Valide les identifiants et génère le cookie `noxfort_session`. |
 | `/api/auth/logout` | `POST` | Authentifié | Révoque le jeton de session actif. |
-| `/api/devices` | `GET` | Opérateur+ | Liste les équipements enregistrés et le statut `LastSeen`. |
-| `/api/devices/register` | `POST` | Admin | Enregistre ou met à jour un équipement. |
+| `/api/auth/status` | `GET` | Public | Retourne l'état de session, nom d'utilisateur et rôle. |
+| `/api/auth/register` | `POST` | Admin | Alias protégé de création de compte avec validation de complexité du mot de passe. |
+| `/devices` | `GET` | Opérateur+ | Affiche l'écran de gestion des équipements avec `LastSeen`. |
+| `/devices/delete` | `GET` | Admin | Supprime un équipement via paramètre query (`?id=xyz`) et redirige (`303`). |
+| `/contacts` | `GET` | Opérateur+ | Affiche l'interface de gestion de l'Équipe d'Intervention. |
+| `/contacts/create` | `POST` | Admin | Enregistre un nouveau contact d'alerte (nom, email, téléphone, telegram_chat_id, rôle). |
+| `/contacts/update` | `POST` | Admin | Met à jour les coordonnées et canaux d'un contact existant. |
+| `/contacts/delete` | `POST` | Admin | Supprime un contact de l'équipe d'intervention. |
+| `/api/users` | `GET` | Admin | Retourne la liste JSON de tous les opérateurs enregistrés. |
+| `/api/users/create` | `POST` | Admin | Crée un compte opérateur ou administrateur (mot de passe 8+ caractères requis). |
+| `/api/users/delete` | `POST` | Admin | Supprime un compte utilisateur (le superutilisateur est protégé). |
+| `/api/settings/database/status` | `GET` | Authentifié | Retourne le moteur actif (Postgres/SQLite), version et latence. |
 | `/api/settings/database/test` | `POST` | Admin | Teste la connectivité PostgreSQL avant basculement. |
-| `/api/settings/database/migrate`| `POST` | Admin | Migre les tables de données entre SQLite et PostgreSQL. |
-| `/api/settings/database/save` | `POST` | Admin | Recharge à chaud les dépôts actifs avec le moteur cible. |
-| `/api/tunnel/start` | `POST` | Admin | Démarre le tunnel inverse Ngrok. |
-| `/api/tunnel/stop` | `POST` | Admin | Ferme le tunnel inverse. |
+| `/api/settings/database/save` | `POST` | Admin | Recharge à chaud les dépôts actifs avec le moteur cible (`migrate=true` supporté). |
+| `/api/settings/database/provision-user` | `POST` | Admin | Crée un utilisateur dédié avec droits restreints sur le schéma PostgreSQL. |
+| `/api/settings/database/backup` | `POST` | Admin | Déclenche un instantané à chaud cohérent de la base (`VACUUM INTO` / `pg_dump`). |
+| `/api/settings/database/backups` | `GET` | Admin | Liste les instantanés de sauvegarde disponibles dans `backups/`. |
+| `/api/tunnel/status` | `GET` | Authentifié | Retourne l'état WAN, fournisseur (DuckDNS/Ngrok), URLs et IPv6. |
+| `/api/tunnel/save` | `POST` | Admin | Enregistre les paramètres DuckDNS / Ngrok dans la base de données. |
+| `/api/tunnel/start` | `POST` | Admin | Déclenche la mise à jour dynamique DuckDNS ou ouvre le tunnel. |
+| `/api/tunnel/stop` | `POST` | Admin | Interrompt les mises à jour et désactive le démarrage automatique. |
+| `/api/tunnel/disconnect` | `POST` | Admin | Supprime les identifiants enregistrés et arrête le service. |
+| `/api/tunnel/test` | `POST` | Admin | Valide activement le jeton et la résolution DNS de DuckDNS. |
 | `/api/audit/security` | `GET` | Admin | Consulte les journaux d'accès et d'audit de sécurité. |
 | `/api/audit/alerts` | `GET` | Admin | Consulte les journaux d'expédition et SLA d'alertes. |
+| `/api/audit/transitions` | `GET` | Admin | Consulte l'historique des pannes et durées d'indisponibilité. |
+| `/settings/test` | `POST` | Admin | Envoie un email de test avec la configuration SMTP active. |
+| `/settings/test-telegram` | `POST` | Admin | Envoie une alerte de test MarkdownV2 vers Telegram. |
+| `/api/open-external` | `POST` | Authentifié | Ouvre une URL dans le navigateur par défaut du système. |
+| `/api/window/toggle-fullscreen` | `POST` | Public | Bascule la fenêtre Wails en plein écran. |
+| `/api/window/exit-fullscreen` | `POST` | Public | Quitte le mode plein écran. |
+
+---
+
+## 4. Endpoints Publics d'Observabilité et Diagnostics
+
+*Exempts d'authentification pour scraping Prometheus et sondes de conteneurs.*
+
+| Endpoint | Méthode | Description | Format |
+|---|---|---|---|
+| `/healthz` | `GET` | Sonde de vivacité liveness (réponse 200 `OK`). | `text/plain` |
+| `/api/health` | `GET` | Diagnostic approfondi : santé et latence BD, statut MQTT, mémoire, goroutines et nœuds. | `application/json` |
+| `/metrics` | `GET` | Métriques au format **Prometheus** (`noxfort_uptime_seconds`, `noxfort_goroutines`, etc.). | `text/plain; version=0.0.4` |

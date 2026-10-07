@@ -62,8 +62,8 @@ func ValidateEnvironmentSecurity(envPath string) SecurityAuditReport {
 	adminUser := os.Getenv("MONITOR_ADMIN_USER")
 	adminPass := os.Getenv("MONITOR_ADMIN_PASSWORD")
 
-	if (adminUser == "admin" || adminUser == "") && (adminPass == "admin" || adminPass == "") {
-		warn := "[SECURITY] CRITICAL WARNING: Default administrative credentials ('admin'/'admin') are active! Please set a strong MONITOR_ADMIN_PASSWORD in production."
+	if (adminUser == DefaultSuperuserUsername || adminUser == "admin" || adminUser == "") && (adminPass == DefaultSuperuserPassword || adminPass == "admin" || adminPass == "") {
+		warn := "[SECURITY] CRITICAL WARNING: Default administrative credentials ('" + DefaultSuperuserUsername + "' / '" + DefaultSuperuserPassword + "') are active! Please set a strong MONITOR_ADMIN_PASSWORD in production."
 		log.Println(warn)
 		report.DefaultAdminAlert = true
 		report.Warnings = append(report.Warnings, warn)

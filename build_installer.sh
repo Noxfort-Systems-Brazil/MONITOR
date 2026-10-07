@@ -45,7 +45,7 @@ echo "╚═══════════════════════�
 echo -e "${NC}"
 
 # 1. Compile binary
-echo -e "${YELLOW}[1/4] Sincronizando ícones e compilando binário Desktop (Wails v2)...${NC}"
+echo -e "${YELLOW}[1/4] Syncing icons and compiling Desktop binary (Wails v2)...${NC}"
 if [ -f "${SCRIPT_DIR}/web/static/img/logo.png" ]; then
     python3 -c '
 from PIL import Image
@@ -57,10 +57,10 @@ fi
 
 mkdir -p "${SCRIPT_DIR}/bin"
 GOTOOLCHAIN=local GOOS=linux GOARCH=amd64 go build -tags "production,webkit2_41" -ldflags="-s -w" -o "${SCRIPT_DIR}/bin/noxfort-monitor" "${SCRIPT_DIR}/cmd/server/main.go"
-echo -e "${GREEN}✓ Binário compilado com sucesso: bin/noxfort-monitor${NC}"
+echo -e "${GREEN}✓ Binary successfully compiled: bin/noxfort-monitor${NC}"
 
 # 2. Prepare Debian package directory structure
-echo -e "${YELLOW}[2/4] Preparando estrutura de arquivos do pacote...${NC}"
+echo -e "${YELLOW}[2/4] Preparing package directory structure...${NC}"
 rm -rf "${SCRIPT_DIR}/build_deb"
 mkdir -p "${BUILD_DIR}/DEBIAN"
 mkdir -p "${BUILD_DIR}/opt/noxfort-monitor"
@@ -108,7 +108,7 @@ chmod 644 "${BUILD_DIR}/usr/share/applications/noxfort-monitor.desktop"
 cp "${BUILD_DIR}/usr/share/applications/noxfort-monitor.desktop" "${BUILD_DIR}/etc/xdg/autostart/noxfort-monitor.desktop"
 
 # 3. Create DEBIAN control & maintainer scripts
-echo -e "${YELLOW}[3/4] Criando arquivos de controle e scripts de instalação...${NC}"
+echo -e "${YELLOW}[3/4] Creating control files and installation scripts...${NC}"
 
 cat << EOF > "${BUILD_DIR}/DEBIAN/control"
 Package: noxfort-monitor
@@ -142,9 +142,9 @@ gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database -q /usr/share/applications 2>/dev/null || true
 
 echo ""
-echo "✅ Noxfort Monitor instalado com sucesso!"
-echo "   Execute: noxfort-monitor"
-echo "   Ou procure 'Noxfort Monitor' no menu de aplicativos."
+echo "✅ Noxfort Monitor successfully installed!"
+echo "   Run: noxfort-monitor"
+echo "   Or search for 'Noxfort Monitor' in the application menu."
 echo ""
 exit 0
 EOF
@@ -153,6 +153,7 @@ chmod 755 "${BUILD_DIR}/DEBIAN/postinst"
 cat << 'EOF' > "${BUILD_DIR}/DEBIAN/prerm"
 #!/bin/bash
 set -e
+pkill -f noxfort-monitor 2>/dev/null || true
 rm -f /usr/local/bin/noxfort-monitor
 exit 0
 EOF
@@ -168,7 +169,7 @@ EOF
 chmod 755 "${BUILD_DIR}/DEBIAN/postrm"
 
 # 4. Build .deb package
-echo -e "${YELLOW}[4/4] Gerando pacote .deb...${NC}"
+echo -e "${YELLOW}[4/4] Generating .deb package...${NC}"
 dpkg-deb --build --root-owner-group "${BUILD_DIR}" "${SCRIPT_DIR}/${DEB_FILENAME}"
 rm -rf "${SCRIPT_DIR}/build_deb"
 
@@ -176,7 +177,7 @@ DEB_SIZE=$(du -sh "${SCRIPT_DIR}/${DEB_FILENAME}" | cut -f1)
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  INSTALADOR GERADO COM SUCESSO!                      ║${NC}"
+echo -e "${GREEN}║  INSTALLER BUILT SUCCESSFULLY!                       ║${NC}"
 echo -e "${GREEN}║                                                      ║${NC}"
-echo -e "${GREEN}║  Pacote: ${DEB_FILENAME} (${DEB_SIZE})               ║${NC}"
+echo -e "${GREEN}║  Package: ${DEB_FILENAME} (${DEB_SIZE})              ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"

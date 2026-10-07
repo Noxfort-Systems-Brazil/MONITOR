@@ -20,17 +20,26 @@ You can deploy Noxfort Monitor in two primary ways:
 
 On your build machine or CI/CD runner:
 ```bash
-# Generates the package in build_deb/noxfort-monitor_2.0.1_amd64.deb
+# Compiles binary, packages desktop integrations, and outputs to the root directory
 make deb
+# Generates ./noxfort-monitor_2.0.1_amd64.deb
 ```
 
 On the target host:
 ```bash
+# Option A: Automatic installation via Makefile (replaces or upgrades existing)
+make install-deb
+
+# Option B: Direct dpkg installation
 sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
-sudo apt-get install -f # Resolves missing dependencies if needed
+sudo apt-get install -f # Resolves missing runtime dependencies if needed
+
+# To uninstall:
+make uninstall-deb
+# or: sudo apt remove -y noxfort-monitor
 ```
 
-This installs the software to `/opt/noxfort-monitor/`, symlinks `/usr/local/bin/noxfort-monitor`, installs desktop application icons, and enables Mosquitto MQTT via systemd.
+This installs the software to `/opt/noxfort-monitor/`, symlinks `/usr/local/bin/noxfort-monitor`, installs desktop application icons, auto-starts in user sessions, and enables Mosquitto MQTT via systemd.
 
 ---
 

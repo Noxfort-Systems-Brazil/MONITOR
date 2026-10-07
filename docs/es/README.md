@@ -32,11 +32,14 @@ Este directorio contiene la suite de documentación técnica en **Español** par
 | 📡 **[API y Protocolos de Ingestión](api_reference.md)** | Protocolos de Red | Ingestión MQTT asíncrona (`:1883`), REST `POST /api/telemetry` (`:22100`), esquema JSON unificado `IncomingEvent` y rutas administrativas. |
 | 🗄️ **[Base de Datos y Dual-Engine](database.md)** | Persistencia Relacional | Cambio dinámico en caliente mediante `DBManager`, PostgreSQL & SQLite puro sin CGO, migración consistente y adaptadores de dialecto. |
 | 🔐 **[Seguridad, Autenticación y RBAC](security.md)** | Control de Acceso | Control de acceso basado en roles (`RoleAdmin`, `RoleOperator`), hash con sal criptográfica, cookies de sesión y arranque idempotente. |
-| 🌐 **[Acceso Remoto y Túnel Ngrok](remote_access.md)** | Conectividad WAN | Túnel inverso TLS a través de cortafuegos industriales y CGNAT, dominios estáticos e ingestión telemétrica externa. |
+| 🌐 **[Acceso Remoto y WAN (DuckDNS y Ngrok)](remote_access.md)** | Conectividad WAN | Sincronización dinámica de IP vía DuckDNS, túnel inverso Ngrok a través de cortafuegos y CGNAT e ingestión remota. |
+| 🛡️ **[Proxy Inverso Caddy y DuckDNS](caddy_integration.md)** | Pasarela HTTPS | Terminación TLS/SSL automática con desafío ACME DNS-01, puerto 443 estandarizado y WebSockets cifrados (`/mqtt`). |
 | 🖥️ **[Aplicación Desktop y Headless](desktop_app.md)** | Interfaz y Operación | Runtime nativo en Wails v2 con WebKitGTK, bloqueo de instancia única mediante socket IPC Unix, bandeja del sistema y modo `--headless`. |
 | 🔍 **[Pista de Auditoría y SLA](audit_trail.md)** | Trazabilidad y Cumplimiento | Modelo de triple auditoría: registros de seguridad (`SecurityAuditLog`), cumplimiento de SLA de alertas (`AlertDispatchLog`) e indisponibilidad. |
-| 🚀 **[Guía de Despliegue en Producción](deployment.md)** | Operaciones y DevOps | Servicio systemd en modo headless, proxy inverso NGINX con terminación SSL y empaquetado Debian `.deb`. |
+| 🚀 **[Guía de Despliegue en Producción](deployment.md)** | Operaciones y DevOps | Servicio systemd en modo headless, pasarela HTTPS con Caddy/NGINX y empaquetado Debian `.deb`. |
 | 🧪 **[Pruebas y Calidad de Software](testing.md)** | Validación y Calidad | Suite de pruebas unitarias con mocks en Go, verificación manual E2E con `mosquitto_pub` / `curl` y diagnóstico de canales. |
+| 👨‍💻 **[Guía Avanzada para Desarrolladores](developer_guides.md)** | Ingeniería y Extensibilidad | Entorno local, principios SOLID, repositorios recargables (`DBManager`), nuevos canales y entidades. |
+| 🔬 **[Notas de Investigación y Decisiones Técnicas](research_notes.md)** | Registros Arquitectónicos (ADRs) | Historial de decisiones técnicas: eliminación de CGO, Wails v2, DuckDNS/Caddy y hoja de ruta con gRPC. |
 
 ---
 

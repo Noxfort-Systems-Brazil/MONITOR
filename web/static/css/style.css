@@ -254,3 +254,34 @@ footer {
     background: #d32f2f;
     /* Red on hover */
 }
+
+/* 11. Password Strength Meter & Security Checklist */
+.password-strength-bar {
+    transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.password-requirements {
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+.req-item {
+    transition: color 0.2s ease;
+}
+
+.req-item .req-icon {
+    font-size: 0.8rem;
+    width: 14px;
+    text-align: center;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.btn-toggle-password {
+    cursor: pointer;
+    border-color: #30363d !important;
+}
+
+.btn-toggle-password:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff !important;
+}

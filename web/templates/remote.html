@@ -11,7 +11,7 @@ License, or (at your option) any later version.
 File: web/templates/remote.html
 Author: Gabriel Moraes
 Date: 2026-09-13
-Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
+Modified: 2026-09-13 (Ngrok replaced by DuckDNS & Direct IPv6)
 */}}
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom border-secondary">
@@ -30,7 +30,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
 
 <div class="row justify-content-center">
     <div class="col-12 col-lg-8 col-xl-7">
-        {{/* ─── Card de Diagnóstico de Rede (IPv6 & IPv4) ─── */}}
+        {{/* ─── Network Diagnostics Card (IPv6 & IPv4) ─── */}}
         <div class="card bg-dark border-secondary shadow-sm mb-4">
             <div class="card-body p-3">
                 <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -57,9 +57,9 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
             </div>
         </div>
 
-        {{/* ─── Card Principal de Acesso Remoto ─── */}}
+        {{/* ─── Main Remote Access Card ─── */}}
         <div class="card bg-dark border-secondary shadow-lg">
-            {{/* Cabeçalho do Card */}}
+            {{/* Card Header */}}
             <div class="card-header border-secondary bg-black bg-opacity-25 d-flex justify-content-between align-items-center py-3">
                 <h5 class="mb-0 text-white">
                     <i class="fa-solid fa-globe me-2 text-info"></i>
@@ -73,7 +73,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
             </div>
 
             <div class="card-body p-4">
-                {{/* Banner Informativo de Conexão Ativa */}}
+                {{/* Active Connection Info Banner */}}
                 <div id="tunnel-online-banner" class="alert alert-success bg-black border-success d-flex align-items-center mb-4 {{ if ne .Status.State "ONLINE" }}d-none{{ end }}">
                     <i class="fa-solid fa-shield-halved fs-3 text-success me-3"></i>
                     <div>
@@ -82,7 +82,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                     </div>
                 </div>
 
-                {{/* Endereço de Telemetria Unificado */}}
+                {{/* Unified Telemetry Address */}}
                 <div class="mb-4">
                     <label class="form-label text-muted small fw-bold text-uppercase d-flex justify-content-between">
                         <span><i class="fa-solid fa-link me-1 text-info"></i> <span data-i18n="remote_telemetry_address">Endereço Fixo de Telemetria</span></span>
@@ -102,13 +102,13 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                     </small>
                 </div>
 
-                {{/* Mensagem de Erro (se houver) */}}
+                {{/* Error Message (if any) */}}
                 <div id="tunnel-error-box" class="alert alert-danger bg-black border-danger small {{ if not .Status.ErrorMessage }}d-none{{ end }} mb-4">
                     <i class="fa-solid fa-circle-exclamation me-1"></i>
                     <span id="tunnel-error-msg">{{ .Status.ErrorMessage }}</span>
                 </div>
 
-                {{/* Configurações do DuckDNS */}}
+                {{/* DuckDNS Configuration */}}
                 <div class="border-top border-secondary pt-3">
                     <form action="/api/tunnel/save" method="POST" id="tunnelConfigForm">
                         {{/* DuckDNS Token */}}
@@ -149,9 +149,9 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                             </small>
                         </div>
 
-                        {{/* Ações do DuckDNS */}}
+                        {{/* DuckDNS Actions */}}
                         <div class="d-grid gap-2">
-                            {{/* Botão Principal de Conexão */}}
+                            {{/* Main Connect Button */}}
                             <button type="button" id="btn-connect-tunnel" class="btn btn-success py-2 fw-bold {{ if eq .Status.State "ONLINE" }}d-none{{ end }}">
                                 <i class="fa-solid fa-play me-2" id="icon-connect-tunnel"></i>
                                 <span id="text-connect-tunnel" data-i18n="remote_connect_btn">Conectar DuckDNS</span>
@@ -161,7 +161,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                                 <span id="text-stop-tunnel" data-i18n="remote_disconnect_btn">Desconectar DuckDNS</span>
                             </button>
 
-                            {{/* Linha Secundária: Salvar e Testar */}}
+                            {{/* Secondary Row: Save and Test */}}
                             <div class="row g-2 mt-1">
                                 <div class="col-12 col-sm-6">
                                     <button type="submit" id="btn-save-credentials" class="btn btn-outline-light w-100 py-2 fw-bold">
@@ -177,7 +177,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                                 </div>
                             </div>
 
-                            {{/* Ação de Remoção */}}
+                            {{/* Remove Action */}}
                             <div class="text-center mt-2">
                                 <button type="button" id="btn-disconnect-tunnel" class="btn btn-link text-muted text-decoration-none btn-sm {{ if not .Settings.DuckDNSToken }}d-none{{ end }}">
                                     <i class="fa-solid fa-trash-can me-1"></i>
@@ -189,7 +189,7 @@ Modified: 2026-09-13 (Substituição do Ngrok por DuckDNS & IPv6 Direto)
                 </div>
             </div>
 
-            {{/* Rodapé */}}
+            {{/* Footer */}}
             <div class="card-footer bg-black bg-opacity-25 border-secondary text-muted small d-flex justify-content-between align-items-center">
                 <span>
                     <i class="fa-solid fa-server me-1"></i> <span data-i18n="remote_fixed_port">Porta Fixa</span>: <strong class="local-port-label">{{ .LocalPort }}</strong>
