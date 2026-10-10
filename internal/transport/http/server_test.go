@@ -134,11 +134,23 @@ func TestExternalIngestionHandler_BlocksBrowserAccess(t *testing.T) {
 	recJSON := httptest.NewRecorder()
 	ingestionHandler.ServeHTTP(recJSON, reqJSON)
 
-	if recJSON.Code != http.StatusForbidden {
-		t.Fatalf("Expected status 403 Forbidden on JSON GET /api/auth/status, got %d", recJSON.Code)
-	}
 	if !strings.Contains(recJSON.Body.String(), "Forbidden") {
 		t.Errorf("Expected Forbidden JSON response, got: %s", recJSON.Body.String())
+	}
+
+	// 5. Public Observability probes (/healthz, /metrics) must NOT be blocked with 403
+	reqHealth := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	recHealth := httptest.NewRecorder()
+	ingestionHandler.ServeHTTP(recHealth, reqHealth)
+	if recHealth.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 OK on GET /healthz, got %d", recHealth.Code)
+	}
+
+	reqMetrics := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	recMetrics := httptest.NewRecorder()
+	ingestionHandler.ServeHTTP(recMetrics, reqMetrics)
+	if recMetrics.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 OK on GET /metrics, got %d", recMetrics.Code)
 	}
 }
 

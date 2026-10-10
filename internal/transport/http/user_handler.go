@@ -23,12 +23,10 @@ package http
 
 import (
 	"encoding/json"
-	"html/template"
 	"log"
 	"net/http"
 	"strings"
 
-	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 	"noxfort-monitor-server/internal/security"
 )
@@ -210,16 +208,6 @@ func (h *UserHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[USERS] Error listing users: %v", err)
 	}
 
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/users.html"),
-	)
-	if err != nil {
-		log.Printf("[USERS] Template parse error: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
 	data := map[string]interface{}{
 		"CurrentUser": username,
 		"Superuser":   security.SuperuserUsername,
@@ -228,5 +216,9 @@ func (h *UserHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		"Users":       users,
 	}
 
-	_ = tmpl.Execute(w, data)
+	if err := RenderPage(w, "web/templates/users.html", data); err != nil {
+		log.Printf("[USERS] Template parse error: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 }

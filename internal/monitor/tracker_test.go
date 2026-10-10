@@ -23,6 +23,7 @@ package monitor
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestSystemStatusTracker_StateTransitions(t *testing.T) {
@@ -96,4 +97,34 @@ func TestSystemStatusTracker_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestSystemStatusTracker_SeedOfflineAndDuration(t *testing.T) {
+	tracker := NewSystemStatusTracker()
+	system := "BOOT-OFFLINE-01"
+
+	// 1. Seed as offline
+	fiveMinutesAgo := time.Now().Add(-5 * time.Minute)
+	tracker.SeedOffline(system, fiveMinutesAgo)
+
+	if !tracker.IsOffline(system) {
+		t.Errorf("Expected %s to be offline after SeedOffline", system)
+	}
+
+	// 2. MarkOffline should return false (already known offline)
+	if tracker.MarkOffline(system) {
+		t.Errorf("Expected MarkOffline to return false for pre-seeded offline system")
+	}
+
+	// 3. MarkOnlineWithDuration should return true and duration >= 5 minutes
+	recovered, duration := tracker.MarkOnlineWithDuration(system)
+	if !recovered {
+		t.Errorf("Expected MarkOnlineWithDuration to return true")
+	}
+	if duration < 5*time.Minute {
+		t.Errorf("Expected duration >= 5m, got %v", duration)
+	}
+	if tracker.IsOffline(system) {
+		t.Errorf("Expected %s to be online after recovery", system)
+	}
 }

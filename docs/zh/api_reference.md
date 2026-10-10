@@ -42,6 +42,7 @@
 
 * **端口**: `22100`（或 Caddy / Ngrok 公网域名）
 * **权限验证**: 公开接口（无需 Token，适配边缘自主传感器）。
+* **网络隔离**: 在生产环境 (`ExternalIngestionHandler`) 下，端口 `22100` 仅对外开放 `POST /api/telemetry`、`/healthz`、`/api/health` 及 `/metrics`。浏览器直接访问控制台页面将被拦截并返回 **403 Forbidden**。
 * **请求头**: `Content-Type: application/json`
 * **请求体**: 与 `IncomingEvent` 结构一致。
 
@@ -70,7 +71,7 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/auth/status` | `GET` | 公开 | 返回会话验证状态、用户名与角色。 |
 | `/api/auth/register` | `POST` | Admin | 经过鉴权的创建账号别名，强制执行工业级密码复杂度校验。 |
 | `/devices` | `GET` | Operator+ | 渲染设备管理后台页面，展示已注册节点与 `LastSeen` 状态。 |
-| `/devices/delete` | `GET` | Admin | 根据查询参数 (`?id=xyz`) 删除设备并重定向 (`303`)。 |
+| `/devices/delete` | `POST` | Admin | 通过 POST 表单参数 (`id=xyz`) 删除设备并重定向 (`303`)。 |
 | `/contacts` | `GET` | Operator+ | 渲染应急响应团队管理页面。 |
 | `/contacts/create` | `POST` | Admin | 登记新告警联系人（姓名、邮箱、电话、Telegram ID、角色）。 |
 | `/contacts/update` | `POST` | Admin | 更新联系人信息及通知渠道。 |

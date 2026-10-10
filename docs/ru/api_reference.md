@@ -40,8 +40,9 @@
 ### `POST /api/telemetry`
 Разработан для автономных полевых агентов (**Carina**, **Synapse**, микроконтроллеров IoT или скриптов cURL).
 
-* **Порт**: `22100` (или публичный URL Ngrok)
+* **Порт**: `22100` (или публичный URL DuckDNS/Caddy/Ngrok)
 * **Аутентификация**: Открытая (без middleware для удобства автономных датчиков).
+* **Сетевая изоляция**: В рабочей среде (`ExternalIngestionHandler`) на порту `22100` доступны `POST /api/telemetry`, `/healthz`, `/api/health` и `/metrics`. Прямые запросы из браузера к дашборду возвращают **403 Forbidden**.
 * **Заголовок**: `Content-Type: application/json`
 * **Тело**: Идентично схеме `IncomingEvent`.
 
@@ -68,7 +69,7 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/auth/status` | `GET` | Публичный | Возвращает статус сессии, имя пользователя и роль. |
 | `/api/auth/register` | `POST` | Admin | Защищенный эндпоинт регистрации с проверкой сложности пароля. |
 | `/devices` | `GET` | Оператор+ | Панель управления зарегистрированным оборудованием и `LastSeen`. |
-| `/devices/delete` | `GET` | Admin | Удаление устройства через query-параметр (`?id=xyz`) с перенаправлением (`303`). |
+| `/devices/delete` | `POST` | Admin | Удаление устройства через POST-форму (`id=xyz`) с перенаправлением (`303`). |
 | `/contacts` | `GET` | Оператор+ | Панель управления контактами группы реагирования. |
 | `/contacts/create` | `POST` | Admin | Регистрация получателя оповещений (имя, email, телефон, telegram_chat_id, роль). |
 | `/contacts/update` | `POST` | Admin | Обновление контактов и каналов оповещения. |

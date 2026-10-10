@@ -21,10 +21,8 @@
 package http
 
 import (
-	"html/template"
 	"log"
 	"net/http"
-	"noxfort-monitor-server/internal/appdir"
 	"strconv"
 
 	"noxfort-monitor-server/internal/domain"
@@ -57,19 +55,10 @@ func (h *ContactHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Render Template (Layout + Contacts)
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/contacts.html"),
-	)
-	if err != nil {
+	if err := RenderPage(w, "web/templates/contacts.html", data); err != nil {
 		log.Printf("[CONTACTS] Template error: %v", err)
 		http.Error(w, "Template Error", http.StatusInternalServerError)
 		return
-	}
-
-	// Executes the layout, which will inject the "content" block defined in contacts.html
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("[CONTACTS] Render error: %v", err)
 	}
 }
 

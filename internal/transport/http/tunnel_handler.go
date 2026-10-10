@@ -23,13 +23,11 @@ package http
 
 import (
 	"encoding/json"
-	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 
-	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 	"noxfort-monitor-server/internal/tunnel"
 )
@@ -68,17 +66,7 @@ func (h *TunnelHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/remote.html"),
-	)
-	if err != nil {
-		log.Printf("[REMOTE] Template rendering error: %v", err)
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		return
-	}
-
-	_ = tmpl.Execute(w, map[string]interface{}{
+	data := map[string]interface{}{
 		"Title":       "Remote Access",
 		"Settings":    settings,
 		"Status":      status,
@@ -86,7 +74,13 @@ func (h *TunnelHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		"LocalPort":   localPort,
 		"LocalURL":    "http://" + localIP + ":" + localPort + "/api/telemetry",
 		"BinaryFound": h.tunnelService.IsBinaryAvailable(),
-	})
+	}
+
+	if err := RenderPage(w, "web/templates/remote.html", data); err != nil {
+		log.Printf("[REMOTE] Template rendering error: %v", err)
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // HandleStatus returns the current live status of the tunnel as JSON.

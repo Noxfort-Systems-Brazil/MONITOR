@@ -96,7 +96,7 @@ make run-headless
 ### What Headless Mode Does:
 1. **Disables GUI Initialization**: Bypasses Wails v2 and WebKitGTK window creation entirely.
 2. **Disables IPC Activation Listener**: Skips GUI window restore socket listeners while maintaining system stability.
-3. **Runs External Ingestion Listener**: Starts `ExternalIngestionHandler` on port `22100` solely for accepting IoT sensor data (`POST /api/telemetry`).
+3. **Runs External Ingestion Listener**: Starts `ExternalIngestionHandler` on port `22100` for IoT sensor telemetry (`POST /api/telemetry`) and observability probes (`/healthz`, `/api/health`, `/metrics`).
 4. **Autonomous Operation**: Operates MQTT client subscriptions, silent failure detection (Watchdog Engine), DuckDNS dynamic DNS updates, and automated email/Telegram alert dispatching.
 5. **Security Isolation**: Direct browser access to dashboard HTML pages is blocked with HTTP 403 Forbidden. Headless nodes operate purely as telemetry collectors and incident alert dispatchers.
 6. **Graceful Shutdown**: Listens for standard OS termination signals (`SIGINT`, `SIGTERM`) to release locks and cleanly terminate.

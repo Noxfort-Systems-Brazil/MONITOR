@@ -71,6 +71,6 @@ make run-headless
 
 ### Comportamento em Modo Headless:
 1. **Desativa GUI**: Bypassa a inicialização de janelas Wails v2 e WebKitGTK.
-2. **Servidor HTTP Restrito**: Executa o `ExternalIngestionHandler` na porta `22100`, atendendo exclusivamente requisições de sensores (`POST /api/telemetry`).
+2. **Servidor HTTP Restrito**: Executa o `ExternalIngestionHandler` na porta `22100`, atendendo requisições de sensores (`POST /api/telemetry`) e sondas de observabilidade (`/healthz`, `/api/health`, `/metrics`).
 3. **Bloqueio de Navegador (403)**: Acessos via browser ao dashboard são bloqueados por segurança. O nó opera como coletor autônomo de telemetria e despachador de alertas.
 4. **Shutdown Gracioso**: Bloqueia aguardando sinais de término do SO (`SIGINT`, `SIGTERM`), liberando locks atômicos ao encerrar.

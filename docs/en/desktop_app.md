@@ -70,6 +70,6 @@ make run-headless
 
 ### Headless Mode Behaviors:
 1. **Bypasses GUI**: Skips Wails v2 and WebKitGTK initialization completely.
-2. **Restricted Ingestion Listener**: Starts `ExternalIngestionHandler` on port `22100`, serving exclusively `POST /api/telemetry`.
+2. **Restricted Ingestion Listener**: Starts `ExternalIngestionHandler` on port `22100`, serving IoT telemetry (`POST /api/telemetry`) and observability endpoints (`/healthz`, `/api/health`, `/metrics`).
 3. **Browser Access Blocked (403)**: Web browser access to control routes is blocked with HTTP 403 Forbidden. The node operates purely as an autonomous telemetry ingestion and alert dispatching engine.
 4. **Graceful Shutdown**: Blocks on OS termination signals (`SIGINT`, `SIGTERM`), cleanly releasing kernel locks upon exit.

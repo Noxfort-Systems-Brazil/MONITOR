@@ -74,6 +74,12 @@ func (w *BufferedTelemetryWriter) Enqueue(identifier string, event *domain.Incom
 	}
 }
 
+// SaveEvent implements monitor.EventRecorder, routing telemetry persistence through the batch queue.
+func (w *BufferedTelemetryWriter) SaveEvent(identifier string, event *domain.IncomingEvent) error {
+	w.Enqueue(identifier, event)
+	return nil
+}
+
 func (w *BufferedTelemetryWriter) worker() {
 	defer close(w.doneChan)
 	ticker := time.NewTicker(w.flushInterval)

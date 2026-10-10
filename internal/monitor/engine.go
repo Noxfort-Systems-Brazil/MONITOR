@@ -103,8 +103,32 @@ func NewEngineWithConfig(
 	}
 }
 
+// PreseedInitialStatus inspects registered devices and marks already-offline devices
+// so that the engine does not trigger a false-positive alert storm upon startup.
+func (e *Engine) PreseedInitialStatus() {
+	if e.devices == nil || e.tracker == nil {
+		return
+	}
+
+	devices, err := e.devices.GetAllDevices()
+	if err != nil {
+		log.Printf("[ENGINE] Notice: Failed to preseed initial device statuses: %v", err)
+		return
+	}
+
+	for _, dev := range devices {
+		if !dev.Enabled {
+			continue
+		}
+		if time.Since(dev.LastSeen) > e.config.OfflineThreshold {
+			e.tracker.SeedOffline(dev.Identifier, dev.LastSeen)
+		}
+	}
+}
+
 // Start begins the monitoring loop in a background goroutine.
 func (e *Engine) Start() {
+	e.PreseedInitialStatus()
 	e.ticker = time.NewTicker(e.config.CheckInterval)
 	e.stopChan = make(chan struct{})
 	e.stopOnce = sync.Once{}
@@ -157,7 +181,7 @@ func (e *Engine) CheckSystemsOnce() {
 
 		if timeSince > e.config.OfflineThreshold {
 			// CASE 1: System transitioned to OFFLINE
-			if e.tracker.MarkOffline(dev.Identifier) {
+			if e.tracker.MarkOfflineWithTime(dev.Identifier, dev.LastSeen) {
 				log.Printf("[ENGINE] System %s went OFFLINE (Last seen: %v)", dev.Identifier, timeSince)
 				e.triggerEvent(dev.Identifier, domain.LevelCritical, fmt.Sprintf("System OFFLINE: No signal for %v.", timeSince.Round(time.Second)))
 				if e.auditRepo != nil {
@@ -172,15 +196,15 @@ func (e *Engine) CheckSystemsOnce() {
 			}
 		} else {
 			// CASE 2: System recovered to ONLINE
-			if e.tracker.MarkOnline(dev.Identifier) {
-				log.Printf("[ENGINE] System %s recovered (ONLINE)", dev.Identifier)
+			if recovered, offlineDuration := e.tracker.MarkOnlineWithDuration(dev.Identifier); recovered {
+				log.Printf("[ENGINE] System %s recovered (ONLINE after %v)", dev.Identifier, offlineDuration.Round(time.Second))
 				e.triggerEvent(dev.Identifier, domain.LevelInfo, "System ONLINE: Signal recovered.")
 				if e.auditRepo != nil {
 					_ = e.auditRepo.SaveDeviceStateTransition(&domain.DeviceStateTransition{
 						DeviceIdentifier:   dev.Identifier,
 						PreviousState:      "OFFLINE",
 						NewState:           "ONLINE",
-						DurationOfflineSec: int64(timeSince.Seconds()),
+						DurationOfflineSec: int64(offlineDuration.Seconds()),
 						TransitionAt:       time.Now(),
 					})
 				}

@@ -32,3 +32,4 @@ backups/
 build_deb/
 node_modules/
 coverage/
+recordings/

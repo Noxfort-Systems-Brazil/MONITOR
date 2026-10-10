@@ -59,7 +59,12 @@ test-frontend:
 	@echo "🧪 Running Frontend Tests..."
 	npm test
 
-# 5. Install/Update Dependencies
+# 5b. Record Automated Presentation Video (1080p @ 60 FPS)
+record-demo:
+	@echo "🎬 Generating automated presentation video..."
+	node scripts/demo/record_presentation.cjs
+
+# 5c. Install/Update Dependencies
 deps:
 	@echo "📦 Downloading dependencies..."
 	go mod tidy

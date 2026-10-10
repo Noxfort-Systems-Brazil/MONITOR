@@ -14,11 +14,9 @@ package http
 
 import (
 	"encoding/json"
-	"html/template"
 	"log"
 	"net/http"
 
-	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 )
 
@@ -44,16 +42,6 @@ func (h *AuditHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		transLogs, _ = h.auditRepo.GetRecentDeviceStateTransitions(100)
 	}
 
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/audit.html"),
-	)
-	if err != nil {
-		log.Printf("[AUDIT] Template error: %v", err)
-		http.Error(w, "Template Error", http.StatusInternalServerError)
-		return
-	}
-
 	data := map[string]interface{}{
 		"Title":          "Audit Trail",
 		"SecurityLogs":   secLogs,
@@ -61,7 +49,11 @@ func (h *AuditHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		"TransitionLogs": transLogs,
 	}
 
-	_ = tmpl.Execute(w, data)
+	if err := RenderPage(w, "web/templates/audit.html", data); err != nil {
+		log.Printf("[AUDIT] Template error: %v", err)
+		http.Error(w, "Template Error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // HandleSecurityLogs returns recent security audit entries in JSON.

@@ -50,6 +50,7 @@ import (
 func main() {
 	headless := flag.Bool("headless", false, "Run in headless mode without GUI desktop window")
 	flag.BoolVar(headless, "server-only", false, "Alias for --headless")
+	demo := flag.Bool("demo", false, "Run in demo/presentation mode (serves desktop UI on HTTP for automated recording)")
 	flag.Parse()
 
 	// 0. Single Instance Lock (Atomic OS flock + IPC window activation)
@@ -155,7 +156,9 @@ func main() {
 	alertService := monitor.NewAlertService(contactRepo, settingsRepo, emailChan, telegramChan)
 	alertService.SetAuditRepository(auditRepo)
 
-	stateManager := monitor.NewStateManager(telemetryRepo, deviceRepo, alertService)
+	// High-throughput buffered batch telemetry writer (shields DB from I/O storms)
+	batchWriter := storage.NewBufferedTelemetryWriter(telemetryRepo, 50, 100*time.Millisecond)
+	stateManager := monitor.NewStateManager(batchWriter, deviceRepo, alertService)
 	secManager := security.NewSecurityManager(userRepo)
 	secManager.SetAuditRepository(auditRepo)
 
@@ -225,12 +228,18 @@ func main() {
 	localIP := transportHttp.GetLocalIP()
 	serverURL := fmt.Sprintf("http://%s:%s", localIP, port)
 
-	// Run HTTP server in background for external IoT ingestion (/api/telemetry)
-	// Run HTTP server in background for external IoT ingestion (/api/telemetry)
+	// Run HTTP server in background
 	go func() {
-		log.Printf("[INFO] Ingestion Telemetry Server running at %s (External endpoint: POST /api/telemetry | Browser UI access disabled)", serverURL)
-		if err := httpServer.Run(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("[FATAL] Web Server failed: %v", err)
+		if *demo {
+			log.Printf("[INFO] Demo UI Server running at %s (Full Desktop UI exposed for automated recording)", serverURL)
+			if err := httpServer.RunDesktopServer(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("[FATAL] Web Server failed: %v", err)
+			}
+		} else {
+			log.Printf("[INFO] Ingestion Telemetry Server running at %s (External endpoint: POST /api/telemetry | Browser UI access disabled)", serverURL)
+			if err := httpServer.Run(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("[FATAL] Web Server failed: %v", err)
+			}
 		}
 	}()
 
@@ -252,6 +261,7 @@ func main() {
 			}
 			engine.Stop()
 			mqttClient.Disconnect()
+			batchWriter.Close()
 			if activeDB := dbManager.GetDB(); activeDB != nil {
 				_ = activeDB.Close()
 			}
@@ -260,9 +270,13 @@ func main() {
 	}
 	defer shutdown()
 
-	// 8. Run in Headless or Desktop Mode
-	if *headless {
-		log.Println("[BOOT] Running in HEADLESS mode (no GUI window). Press Ctrl+C to stop.")
+	// 8. Run in Headless, Demo or Desktop Mode
+	if *headless || *demo {
+		if *demo {
+			log.Println("[BOOT] Running in DEMO mode (UI exposed on HTTP for automated recording). Press Ctrl+C to stop.")
+		} else {
+			log.Println("[BOOT] Running in HEADLESS mode (no GUI window). Press Ctrl+C to stop.")
+		}
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		<-sigCh

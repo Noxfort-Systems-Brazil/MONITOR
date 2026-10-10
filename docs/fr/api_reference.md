@@ -40,8 +40,9 @@ Ce document spécifie formellement les interfaces réseau de **Noxfort Monitor�
 ### `POST /api/telemetry`
 Conçu pour les nœuds distants (**Carina**, **Synapse**, microcontrôleurs IoT ou scripts cURL).
 
-* **Port** : `22100` (ou URL publique Ngrok)
+* **Port** : `22100` (ou URL publique DuckDNS/Caddy/Ngrok)
 * **Authentification** : Publique (dispensée de middleware pour accueillir les capteurs autonomes).
+* **Isolation Réseau** : En production (`ExternalIngestionHandler`), `POST /api/telemetry`, `/healthz`, `/api/health` et `/metrics` sont accessibles sur le port `22100`. Les requêtes directes de navigateurs vers le tableau de bord renvoient **403 Forbidden**.
 * **En-tête** : `Content-Type: application/json`
 * **Corps** : Identique au schéma JSON `IncomingEvent`.
 
@@ -68,7 +69,7 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/auth/status` | `GET` | Public | Retourne l'état de session, nom d'utilisateur et rôle. |
 | `/api/auth/register` | `POST` | Admin | Alias protégé de création de compte avec validation de complexité du mot de passe. |
 | `/devices` | `GET` | Opérateur+ | Affiche l'écran de gestion des équipements avec `LastSeen`. |
-| `/devices/delete` | `GET` | Admin | Supprime un équipement via paramètre query (`?id=xyz`) et redirige (`303`). |
+| `/devices/delete` | `POST` | Admin | Supprime un équipement via formulaire POST (`id=xyz`) et redirige (`303`). |
 | `/contacts` | `GET` | Opérateur+ | Affiche l'interface de gestion de l'Équipe d'Intervention. |
 | `/contacts/create` | `POST` | Admin | Enregistre un nouveau contact d'alerte (nom, email, téléphone, telegram_chat_id, rôle). |
 | `/contacts/update` | `POST` | Admin | Met à jour les coordonnées et canaux d'un contact existant. |

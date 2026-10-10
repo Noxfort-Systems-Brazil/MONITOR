@@ -118,6 +118,76 @@ func MigrateData(sourceDB *sql.DB, sourceDriver string, targetDB *sql.DB, target
 		)
 	}
 
+	// 5. Migrate Telemetry Events
+	telRows, err := sourceDB.Query("SELECT category, device_id, origin, level, message, occurred_at FROM telemetry ORDER BY id ASC")
+	if err == nil {
+		defer telRows.Close()
+		insertTelQuery := AdaptQuery(
+			"INSERT INTO telemetry (category, device_id, origin, level, message, occurred_at) VALUES (?, ?, ?, ?, ?, ?);",
+			targetDriver,
+		)
+		for telRows.Next() {
+			var cat, devID, orig, lvl, msg string
+			var occAt sql.NullTime
+			if err := telRows.Scan(&cat, &devID, &orig, &lvl, &msg, &occAt); err == nil {
+				_, _ = targetDB.Exec(insertTelQuery, cat, devID, orig, lvl, msg, occAt)
+			}
+		}
+	}
+
+	// 6. Migrate Security Audit Logs
+	secRows, err := sourceDB.Query("SELECT created_at, username, action, details, ip_address FROM security_audit_logs ORDER BY id ASC")
+	if err == nil {
+		defer secRows.Close()
+		insertSecQuery := AdaptQuery(
+			"INSERT INTO security_audit_logs (created_at, username, action, details, ip_address) VALUES (?, ?, ?, ?, ?);",
+			targetDriver,
+		)
+		for secRows.Next() {
+			var createdAt sql.NullTime
+			var user, action, details, ip string
+			if err := secRows.Scan(&createdAt, &user, &action, &details, &ip); err == nil {
+				_, _ = targetDB.Exec(insertSecQuery, createdAt, user, action, details, ip)
+			}
+		}
+	}
+
+	// 7. Migrate Alert Dispatch Logs
+	alertRows, err := sourceDB.Query("SELECT telemetry_id, channel, recipient, role, status, error_reason, dispatched_at FROM alert_dispatch_logs ORDER BY id ASC")
+	if err == nil {
+		defer alertRows.Close()
+		insertAlertQuery := AdaptQuery(
+			"INSERT INTO alert_dispatch_logs (telemetry_id, channel, recipient, role, status, error_reason, dispatched_at) VALUES (?, ?, ?, ?, ?, ?, ?);",
+			targetDriver,
+		)
+		for alertRows.Next() {
+			var telID sql.NullInt64
+			var ch, rec, role, st, errReas string
+			var dispAt sql.NullTime
+			if err := alertRows.Scan(&telID, &ch, &rec, &role, &st, &errReas, &dispAt); err == nil {
+				_, _ = targetDB.Exec(insertAlertQuery, telID, ch, rec, role, st, errReas, dispAt)
+			}
+		}
+	}
+
+	// 8. Migrate Device State Transitions
+	transRows, err := sourceDB.Query("SELECT device_identifier, previous_state, new_state, duration_offline_sec, transition_at FROM device_state_transitions ORDER BY id ASC")
+	if err == nil {
+		defer transRows.Close()
+		insertTransQuery := AdaptQuery(
+			"INSERT INTO device_state_transitions (device_identifier, previous_state, new_state, duration_offline_sec, transition_at) VALUES (?, ?, ?, ?, ?);",
+			targetDriver,
+		)
+		for transRows.Next() {
+			var devId, prevState, newState string
+			var dur int64
+			var transAt sql.NullTime
+			if err := transRows.Scan(&devId, &prevState, &newState, &dur, &transAt); err == nil {
+				_, _ = targetDB.Exec(insertTransQuery, devId, prevState, newState, dur, transAt)
+			}
+		}
+	}
+
 	log.Printf("[MIGRATOR] Data synchronization completed successfully.")
 	return nil
 }

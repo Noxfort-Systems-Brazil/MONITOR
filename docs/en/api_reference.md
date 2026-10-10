@@ -42,7 +42,7 @@ Designed for edge agents (**Carina**, **Synapse**, IoT microcontrollers, or cURL
 
 * **Port**: `22100` (or public HTTPS URL via DuckDNS/Caddy or Ngrok)
 * **Authentication**: Public (exempt from middleware for autonomous sensor nodes).
-* **Network Isolation**: In production (`ExternalIngestionHandler`), `POST /api/telemetry` is the **only accessible external endpoint**. Direct browser requests to dashboard routes return **403 Forbidden**.
+* **Network Isolation**: In production (`ExternalIngestionHandler`), `POST /api/telemetry`, `/healthz`, `/api/health`, and `/metrics` are accessible on port `22100`. Direct browser requests to dashboard routes return **403 Forbidden**.
 * **Header**: `Content-Type: application/json`
 * **Body**: Identical to `IncomingEvent` JSON schema.
 
@@ -71,7 +71,7 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/auth/status` | `GET` | Public | Returns session authentication state, username, and role. |
 | `/api/auth/register` | `POST` | Admin | Protected account creation alias enforcing industrial password complexity. |
 | `/devices` | `GET` | Operator+ | Renders system management dashboard with registered nodes and `LastSeen` status. |
-| `/devices/delete` | `GET` | Admin | Removes a device via query parameter (`?id=xyz`) and redirects (`303`). |
+| `/devices/delete` | `POST` | Admin | Removes a device via POST form parameter (`id=xyz`) and redirects (`303`). |
 | `/contacts` | `GET` | Operator+ | Renders the Response Team management interface. |
 | `/contacts/create` | `POST` | Admin | Registers a new alert recipient (name, email, phone, telegram_chat_id, role). |
 | `/contacts/update` | `POST` | Admin | Updates contact information and notification channels. |

@@ -22,12 +22,10 @@ package http
 
 import (
 	"encoding/json"
-	"html/template"
 	"log"
 	"net/http"
 	"time"
 
-	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 )
 
@@ -70,14 +68,11 @@ func (h *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := template.ParseFiles(appdir.Path("web/templates/login.html"))
-	if err != nil {
+	if err := RenderTemplate(w, nil, "web/templates/login.html"); err != nil {
 		log.Printf("[AUTH] Template error (login): %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-
-	_ = tmpl.Execute(w, nil)
 }
 
 // ServeRegister redirects unauthenticated visitors to /login, or authenticated admins to /users.

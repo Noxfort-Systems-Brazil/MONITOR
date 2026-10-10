@@ -56,7 +56,7 @@ Designed for field nodes (such as **Carina**, **Synapse**, or cURL/Python script
 * **Body**: Identical to the universal `IncomingEvent` JSON structure.
 
 > [!IMPORTANT]
-> **External Port Scope**: In production runtime (`ExternalIngestionHandler`), `POST /api/telemetry` is the **only route** exposed externally on port `22100`. Browser attempts to access HTML dashboard or administrative routes return **403 Forbidden**. Administrative interactions are performed within the native desktop container.
+> **External Port Scope**: In production runtime (`ExternalIngestionHandler`), `POST /api/telemetry`, `/healthz`, `/api/health`, and `/metrics` are exposed externally on port `22100`. Browser attempts to access HTML dashboard or administrative routes return **403 Forbidden**. Administrative interactions are performed within the native desktop container.
 
 #### Request Example:
 ```bash
@@ -151,7 +151,7 @@ Manages field nodes, edge devices, and telemetry sources:
 | Method | Route | Role | Description | Parameters / Query |
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/devices` | Operator+ | Renders the system management dashboard with all registered devices, telemetry status, and `last_seen` timestamps. | - |
-| `GET` | `/devices/delete` | Admin | Removes a device from monitoring and redirects (`303`) to `/devices`. | `id` (string, e.g. `?id=sensor-node-01`) |
+| `POST` | `/devices/delete` | Admin | Removes a device from monitoring and redirects (`303`) to `/devices`. | `id` (form-encoded body parameter) |
 | `POST` | `/api/telemetry` | Public | Autonomous telemetry ingestion for field agents. See [Section 2](#2-telemetry-ingestion-via-http-rest). | Universal `IncomingEvent` JSON payload. |
 
 ---

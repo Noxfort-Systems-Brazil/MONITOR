@@ -59,7 +59,7 @@ type ReloadableRepository interface {
 
 When switching between SQLite and PostgreSQL, `MigrateData()` guarantees zero data loss:
 1. Opens source and destination database handles concurrently.
-2. Extracts devices, contacts, users, settings, and telemetry history.
+2. Extracts and transfers all entities: devices, contacts, global settings, users, telemetry history, security audit logs, alert dispatch logs, and device state transitions.
 3. Performs upsert operations using `storage.AdaptQuery()` to resolve dialect differences (`ON CONFLICT (id) DO UPDATE`).
 4. Re-points all repositories to the destination database and persists the new configuration to disk.
 

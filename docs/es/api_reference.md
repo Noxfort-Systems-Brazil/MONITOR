@@ -40,8 +40,9 @@ Este documento especifica formalmente las interfaces de comunicación de **Noxfo
 ### `POST /api/telemetry`
 Diseñado para agentes de campo (**Carina**, **Synapse**, microcontroladores IoT o scripts cURL).
 
-* **Puerto**: `22100` (o URL pública de Ngrok)
+* **Puerto**: `22100` (o URL pública de DuckDNS/Caddy/Ngrok)
 * **Autenticación**: Pública (exenta de middleware para nodos autónomos de campo).
+* **Aislamiento de Red**: En producción (`ExternalIngestionHandler`), `POST /api/telemetry`, `/healthz`, `/api/health` y `/metrics` son accesibles en el puerto `22100`. Las solicitudes directas de navegador al panel devuelven **403 Forbidden**.
 * **Cabecera**: `Content-Type: application/json`
 * **Cuerpo**: Idéntico al esquema JSON `IncomingEvent`.
 
@@ -68,7 +69,7 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/auth/status` | `GET` | Público | Retorna estado de autenticación, usuario y rol de la sesión. |
 | `/api/auth/register` | `POST` | Admin | Alias protegido de creación de cuentas con validación de complejidad de contraseña. |
 | `/devices` | `GET` | Operador+ | Renderiza la pantalla de gestión con dispositivos registrados y `LastSeen`. |
-| `/devices/delete` | `GET` | Admin | Elimina un dispositivo por parámetro query (`?id=xyz`) y redirige (`303`). |
+| `/devices/delete` | `POST` | Admin | Elimina un dispositivo por formulario POST (`id=xyz`) y redirige (`303`). |
 | `/contacts` | `GET` | Operador+ | Renderiza el panel de gestión del Equipo de Respuesta. |
 | `/contacts/create` | `POST` | Admin | Registra un nuevo contacto de alerta (nombre, email, teléfono, telegram_chat_id, rol). |
 | `/contacts/update` | `POST` | Admin | Actualiza los datos y canales de notificación de un contacto existente. |

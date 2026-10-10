@@ -22,59 +22,88 @@ package monitor
 
 import (
 	"sync"
+	"time"
 )
 
 // SystemStatusTracker manages the online/offline presence state in memory to suppress alert spam.
 type SystemStatusTracker struct {
-	mu            sync.RWMutex
-	offlineStatus map[string]bool
+	mu           sync.RWMutex
+	offlineSince map[string]time.Time
 }
 
 // NewSystemStatusTracker initializes an empty tracker.
 func NewSystemStatusTracker() *SystemStatusTracker {
 	return &SystemStatusTracker{
-		offlineStatus: make(map[string]bool),
+		offlineSince: make(map[string]time.Time),
 	}
+}
+
+// SeedOffline registers a system as offline on boot to avoid false-positive alerts on the first cycle.
+func (t *SystemStatusTracker) SeedOffline(identifier string, since time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if since.IsZero() {
+		since = time.Now()
+	}
+	t.offlineSince[identifier] = since
 }
 
 // MarkOffline registers a system as offline.
 // It returns true only if the system transitioned from online to offline (first detection).
 func (t *SystemStatusTracker) MarkOffline(identifier string) bool {
+	return t.MarkOfflineWithTime(identifier, time.Now())
+}
+
+// MarkOfflineWithTime registers a system as offline with a specific timestamp.
+func (t *SystemStatusTracker) MarkOfflineWithTime(identifier string, since time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.offlineStatus[identifier] {
+	if _, exists := t.offlineSince[identifier]; exists {
 		return false
 	}
 
-	t.offlineStatus[identifier] = true
+	if since.IsZero() {
+		since = time.Now()
+	}
+	t.offlineSince[identifier] = since
 	return true
 }
 
 // MarkOnline registers a system as recovered.
 // It returns true only if the system transitioned from offline to online (recovery detection).
 func (t *SystemStatusTracker) MarkOnline(identifier string) bool {
+	recovered, _ := t.MarkOnlineWithDuration(identifier)
+	return recovered
+}
+
+// MarkOnlineWithDuration registers a system as recovered and returns the elapsed offline duration.
+func (t *SystemStatusTracker) MarkOnlineWithDuration(identifier string) (bool, time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if !t.offlineStatus[identifier] {
-		return false
+	since, exists := t.offlineSince[identifier]
+	if !exists {
+		return false, 0
 	}
 
-	delete(t.offlineStatus, identifier)
-	return true
+	duration := time.Since(since)
+	delete(t.offlineSince, identifier)
+	return true, duration
 }
 
 // IsOffline checks if an identifier is currently considered offline.
 func (t *SystemStatusTracker) IsOffline(identifier string) bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.offlineStatus[identifier]
+	_, exists := t.offlineSince[identifier]
+	return exists
 }
 
 // Reset clears all tracked presence states.
 func (t *SystemStatusTracker) Reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.offlineStatus = make(map[string]bool)
+	t.offlineSince = make(map[string]time.Time)
 }

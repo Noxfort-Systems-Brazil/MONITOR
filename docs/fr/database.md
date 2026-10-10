@@ -59,6 +59,6 @@ type ReloadableRepository interface {
 
 Lors du basculement entre SQLite et PostgreSQL, la procédure `MigrateData()` garantit l'intégrité intégrale :
 1. Ouvre des connexions simultanées vers la base source et la base cible.
-2. Extrait les équipements, contacts, utilisateurs, paramètres et journaux télémétriques.
+2. Extrait et transfère l'intégralité des entités : équipements (`devices`), contacts (`contacts`), paramètres globaux (`settings`), utilisateurs (`users`), journaux télémétriques (`telemetry`), audits de sécurité (`security_audit_logs`), historiques d'alertes (`alert_dispatch_logs`) et transitions d'état (`device_state_transitions`).
 3. Exécute les opérations d'insertion/mise à jour via `storage.AdaptQuery()` pour adapter les particularités syntaxiques (`ON CONFLICT (id) DO UPDATE`).
 4. Reconnecte l'ensemble des dépôts à la base cible et sauvegarde la configuration sur disque.

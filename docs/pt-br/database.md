@@ -59,6 +59,6 @@ type ReloadableRepository interface {
 
 Ao alternar entre SQLite e PostgreSQL, a rotina `MigrateData()` assegura integridade total:
 1. Abre conexões concorrentes com banco de origem e de destino.
-2. Extrai nós de equipamentos, contatos, usuários, configurações e histórico de incidentes.
+2. Extrai e transfere integralmente todas as entidades: equipamentos (`devices`), contatos (`contacts`), configurações (`settings`), usuários (`users`), histórico de incidentes (`telemetry`), auditoria de segurança (`security_audit_logs`), logs de despacho de alertas (`alert_dispatch_logs`) e transições de estado (`device_state_transitions`).
 3. Executa operações de upsert utilizando `storage.AdaptQuery()` para resolver particularidades de dialeto (`ON CONFLICT (id) DO UPDATE`).
 4. Reassocia os repositórios ao banco de destino e persiste a nova configuração em disco.

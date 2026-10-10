@@ -16,12 +16,10 @@ package http
 import (
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"time"
 
-	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 )
 
@@ -68,21 +66,15 @@ func (h *DatabaseHandler) SetBackupService(bs BackupService) {
 
 // ServePage renders the dedicated Server & Database configuration page.
 func (h *DatabaseHandler) ServePage(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/server.html"),
-	)
-	if err != nil {
-		log.Printf("[SERVER_PAGE] Template error: %v", err)
-		http.Error(w, "Template Error", http.StatusInternalServerError)
-		return
-	}
-
 	data := map[string]interface{}{
 		"Title": "Server & Storage Engine",
 	}
 
-	_ = tmpl.Execute(w, data)
+	if err := RenderPage(w, "web/templates/server.html", data); err != nil {
+		log.Printf("[SERVER_PAGE] Template error: %v", err)
+		http.Error(w, "Template Error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // HandleStatus returns the live status and active configuration of the database.

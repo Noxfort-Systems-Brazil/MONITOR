@@ -137,8 +137,8 @@ graph TD
 
 ### 5.1 External Port Ingestion Handler (`ExternalIngestionHandler`)
 Configured on the network listening socket in [`internal/transport/http/server.go`](../internal/transport/http/server.go):
-1. **Public IoT Endpoint**: Strictly permits `POST /api/telemetry` without credentials to facilitate unhindered ingestion from autonomous edge nodes (Carina, Synapse, 4G sensors).
-2. **Browser UI Blocking**: Any request attempting to access dashboard, settings, or administrative routes over external ports is immediately terminated with **HTTP 403 Forbidden** (returning a user-friendly restricted screen for browsers and JSON error for APIs). Direct browser access to the server UI is completely disabled by design.
+1. **Public IoT & Observability Endpoints**: Strictly permits `POST /api/telemetry` without credentials to facilitate unhindered ingestion from autonomous edge nodes (Carina, Synapse, 4G sensors), as well as health probes (`/healthz`, `/api/health`) and the Prometheus exporter (`/metrics`).
+2. **Browser UI & Administrative Blocking**: Any request attempting to access dashboard, settings, or administrative routes over external ports is immediately terminated with **HTTP 403 Forbidden** (returning a user-friendly restricted screen for browsers and JSON error for APIs). Direct browser access to the server UI is completely disabled by design.
 
 ### 5.2 Internal Desktop Handler & RBAC (`DesktopHandler`)
 Configured in [`internal/transport/http/routes.go`](../internal/transport/http/routes.go) and mounted exclusively into the native Wails application:

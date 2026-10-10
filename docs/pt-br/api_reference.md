@@ -42,7 +42,7 @@ Projetado para agentes de campo (**Carina**, **Synapse**, microcontroladores IoT
 
 * **Porta**: `22100` (ou URL pública HTTPS via DuckDNS/Caddy ou Ngrok)
 * **Autenticação**: Pública (isenta de middleware para atender nós autônomos de campo).
-* **Restrição de Rede**: No servidor externo (`ExternalIngestionHandler`), `POST /api/telemetry` é o **único endpoint público acessível**. Requisições web/navegador a rotas de dashboard retornam **403 Forbidden**.
+* **Restrição de Rede**: No servidor externo (`ExternalIngestionHandler`), `POST /api/telemetry`, `/healthz`, `/api/health` e `/metrics` são acessíveis na porta `22100`. Requisições web/navegador a rotas de dashboard retornam **403 Forbidden**.
 * **Cabeçalho**: `Content-Type: application/json`
 * **Corpo**: Idêntico ao esquema JSON `IncomingEvent`.
 
@@ -71,7 +71,7 @@ curl -X POST http://localhost:22100/api/telemetry \
 | `/api/auth/status` | `GET` | Público | Retorna estado de autenticação, usuário e papel da sessão. |
 | `/api/auth/register` | `POST` | Admin | Alias protegido de criação de conta com validação de complexidade de senha. |
 | `/devices` | `GET` | Operador+ | Renderiza a tela de gerenciamento de sistemas com equipamentos e `last_seen`. |
-| `/devices/delete` | `GET` | Admin | Remove um dispositivo pelo parâmetro query (`?id=xyz`) e redireciona (303). |
+| `/devices/delete` | `POST` | Admin | Remove um dispositivo via formulário POST (`id=xyz`) e redireciona (303). |
 | `/contacts` | `GET` | Operador+ | Renderiza o painel de gerenciamento da Equipe de Resposta. |
 | `/contacts/create` | `POST` | Admin | Cadastra novo contato de alerta (nome, email, telefone, telegram_chat_id, cargo). |
 | `/contacts/update` | `POST` | Admin | Atualiza dados e canais de notificação de um contato existente. |

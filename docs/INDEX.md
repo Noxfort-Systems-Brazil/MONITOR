@@ -67,8 +67,9 @@ MONITOR_CORE/
 │   │   │   ├── device_handler.go   # Device registration & listing API
 │   │   │   ├── middleware.go       # AuthMiddleware for cookie & token RBAC interception
 │   │   │   ├── routes.go           # Full DesktopHandler routing tree for native desktop container
-│   │   │   ├── server.go           # ExternalIngestionHandler (POST /api/telemetry only) & server lifecycle
+│   │   │   ├── server.go           # ExternalIngestionHandler (IoT telemetry & observability) & server lifecycle
 │   │   │   ├── settings_handler.go # System settings & channel test endpoints
+│   │   │   ├── template_cache.go   # Thread-safe compiled HTML template cache
 │   │   │   ├── tunnel_handler.go   # DuckDNS & Ngrok management endpoints (/disconnect, /test)
 │   │   │   └── user_handler.go     # User account management API
 │   │   └── mqtt/                   # Paho MQTT client & async subscription loops

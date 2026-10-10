@@ -51,9 +51,12 @@
                     {{end}}
                 </td>
                 <td class="text-end align-middle">
-                    <a href="/devices/delete?id={{.Identifier}}" class="btn btn-sm btn-outline-danger" onclick="return confirm(window._t('dev_confirm_delete') || 'Are you sure?');">
-                        <i class="bi bi-trash"></i> <span data-i18n="common_btn_delete">Delete</span>
-                    </a>
+                    <form action="/devices/delete" method="POST" class="d-inline">
+                        <input type="hidden" name="id" value="{{.Identifier}}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm(window._t('dev_confirm_delete') || 'Are you sure?');">
+                            <i class="fa-solid fa-trash"></i> <span data-i18n="common_btn_delete">Delete</span>
+                        </button>
+                    </form>
                 </td>
             </tr>
             {{else}}

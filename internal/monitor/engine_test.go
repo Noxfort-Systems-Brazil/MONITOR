@@ -226,3 +226,33 @@ func TestEngine_ConfigDefaults(t *testing.T) {
 		t.Errorf("Expected positive default OfflineThreshold, got %v", engine.config.OfflineThreshold)
 	}
 }
+
+func TestEngine_PreseedInitialStatus(t *testing.T) {
+	devices := []domain.Device{
+		{
+			Identifier: "OFFLINE-ON-BOOT",
+			Name:       "Offline Node",
+			LastSeen:   time.Now().Add(-1 * time.Hour),
+			Enabled:    true,
+		},
+	}
+
+	mockDevices := &mockDeviceLister{devices: devices}
+	mockAlerts := &mockAlertDispatcher{}
+	mockEvents := &mockEventRecorder{}
+
+	engine := NewEngine(mockDevices, mockEvents, mockAlerts)
+	// Call PreseedInitialStatus directly
+	engine.PreseedInitialStatus()
+
+	// System should be offline in tracker
+	if !engine.tracker.IsOffline("OFFLINE-ON-BOOT") {
+		t.Errorf("Expected OFFLINE-ON-BOOT to be marked offline by preseed")
+	}
+
+	// First cycle check should NOT generate an alert because it was preseeded
+	engine.CheckSystemsOnce()
+	if len(mockAlerts.alerts) != 0 {
+		t.Errorf("Expected 0 alerts for preseeded offline device, got %d", len(mockAlerts.alerts))
+	}
+}

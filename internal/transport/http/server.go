@@ -146,6 +146,15 @@ func (s *Server) ExternalIngestionHandler() http.Handler {
 	// 1. Telemetry Ingestion for field agents (Carina, Synapse, IoT)
 	mux.HandleFunc("/api/telemetry", s.telemetryHandler.HandleIngest)
 
+	// 1b. Observability & Health Checks (Public / Monitoring Probes)
+	if s.healthHandler != nil {
+		mux.HandleFunc("/healthz", s.healthHandler.ServeLiveness)
+		mux.HandleFunc("/api/health", s.healthHandler.ServeHealth)
+	}
+	if s.metricsHandler != nil {
+		mux.HandleFunc("/metrics", s.metricsHandler.ServeMetrics)
+	}
+
 	// 2. All other routes: Block browser access with 403 Forbidden
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.Header.Get("Accept"), "application/json") {
@@ -231,6 +240,21 @@ func (s *Server) Run() error {
 	}
 
 	log.Printf("🌍 External Telemetry Listener running on %s (Ingestion only: POST /api/telemetry)", s.addr)
+	return s.httpServer.ListenAndServe()
+}
+
+// RunDesktopServer runs the full desktop UI server on the configured address (used for automated recording and demonstrations).
+func (s *Server) RunDesktopServer() error {
+	handler := s.DesktopHandler()
+
+	s.httpServer = &http.Server{
+		Addr:         s.addr,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+	}
+
+	log.Printf("🌍 Desktop UI Server running on %s (Full UI Access Enabled)", s.addr)
 	return s.httpServer.ListenAndServe()
 }
 

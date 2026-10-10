@@ -21,11 +21,9 @@
 package http
 
 import (
-	"html/template"
 	"log"
 	"net/http"
 	"os"
-	"noxfort-monitor-server/internal/appdir"
 
 	"noxfort-monitor-server/internal/domain"
 	"noxfort-monitor-server/internal/tunnel"
@@ -54,23 +52,11 @@ func (h *DeviceHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render the management view
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/devices.html"),
-	)
-	if err != nil {
-		log.Printf("[DEVICES] Template error: %v", err)
-		http.Error(w, "Template Error", http.StatusInternalServerError)
-		return
-	}
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "22100"
 	}
 
-	// Prefer the unified Ngrok Telemetry URL
 	pushTarget := GetLocalIP()
 	if h.tunnelService != nil {
 		status := h.tunnelService.GetStatus()
@@ -86,14 +72,24 @@ func (h *DeviceHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		"ServerPort": port,
 	}
 
-	tmpl.Execute(w, data)
+	if err := RenderPage(w, "web/templates/devices.html", data); err != nil {
+		log.Printf("[DEVICES] Template error: %v", err)
+		http.Error(w, "Template Error", http.StatusInternalServerError)
+		return
+	}
 }
 
-// HandleDelete removes a system from monitoring.
+// HandleDelete removes a system from monitoring (strictly requires POST).
 func (h *DeviceHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
-	// We delete by Identifier (string), passed in the query param 'id'
-	// URL Example: /devices/delete?id=synapse
-	identifier := r.URL.Query().Get("id")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	identifier := r.FormValue("id")
+	if identifier == "" {
+		identifier = r.URL.Query().Get("id")
+	}
 
 	if identifier != "" {
 		log.Printf("[DEVICES] Requesting deletion for system: %s", identifier)

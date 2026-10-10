@@ -59,7 +59,7 @@ type ReloadableRepository interface {
 
 在 SQLite 与 PostgreSQL 之间切换时，`MigrateData()` 保障数据零丢失：
 1. 并发建立源数据库与目标数据库的活动连接。
-2. 批量导出设备、联系人、用户、配置及遥测历史记录。
+2. 完整迁移所有实体：设备 (`devices`)、联系人 (`contacts`)、全局配置 (`settings`)、用户 (`users`)、遥测事件 (`telemetry`)、安全审计日志 (`security_audit_logs`)、告警发送日志 (`alert_dispatch_logs`) 与设备状态变更记录 (`device_state_transitions`)。
 3. 利用 `storage.AdaptQuery()` 统一处理方言冲突（如 `ON CONFLICT (id) DO UPDATE`）。
 4. 切换所有仓储引用至新数据库并将配置持久化至磁盘。
 

@@ -21,10 +21,8 @@
 package http
 
 import (
-	"html/template"
 	"log"
 	"net/http"
-	"noxfort-monitor-server/internal/appdir"
 	"time"
 
 	"noxfort-monitor-server/internal/domain"
@@ -106,15 +104,9 @@ func (h *DashboardHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		"Now":             time.Now().Format(time.RFC3339),
 	}
 
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/dashboard.html"),
-	)
-	if err != nil {
+	if err := RenderPage(w, "web/templates/dashboard.html", data); err != nil {
 		log.Printf("[DASHBOARD] Template error: %v", err)
 		http.Error(w, "Template Error", http.StatusInternalServerError)
 		return
 	}
-
-	tmpl.Execute(w, data)
 }

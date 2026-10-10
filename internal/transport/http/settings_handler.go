@@ -22,13 +22,11 @@
 package http
 
 import (
-	"html/template"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"noxfort-monitor-server/internal/appdir"
 	"noxfort-monitor-server/internal/domain"
 )
 
@@ -84,24 +82,21 @@ func (h *SettingsHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := template.ParseFiles(
-		appdir.Path("web/templates/layout.html"),
-		appdir.Path("web/templates/settings.html"),
-		appdir.Path("web/templates/partials/settings_smtp.html"),
-		appdir.Path("web/templates/partials/settings_telegram.html"),
-	)
-	if err != nil {
-		log.Printf("[SETTINGS] Template error: %v", err)
-		http.Error(w, "Template Error", http.StatusInternalServerError)
-		return
-	}
-
 	data := map[string]interface{}{
 		"Title":    "System Settings",
 		"Settings": settings,
 	}
 
-	_ = tmpl.Execute(w, data)
+	if err := RenderTemplate(w, data,
+		"web/templates/layout.html",
+		"web/templates/settings.html",
+		"web/templates/partials/settings_smtp.html",
+		"web/templates/partials/settings_telegram.html",
+	); err != nil {
+		log.Printf("[SETTINGS] Template error: %v", err)
+		http.Error(w, "Template Error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // HandleSave processes the form submission to update settings.

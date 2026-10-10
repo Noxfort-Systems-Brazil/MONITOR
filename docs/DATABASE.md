@@ -98,6 +98,10 @@ The [`internal/storage/migrator.go`](../internal/storage/migrator.go) module imp
 2. **Contacts (`contacts`)**: Name, email, phone, operational role (`role`), notification preferences (`notify_critical`, `enabled`), and Telegram Chat ID.
 3. **Global Settings (`settings`)**: SMTP parameters, MQTT broker address, DuckDNS credentials (`duckdns_token`, `duckdns_domain`, `duckdns_enabled`), Ngrok parameters (`ngrok_auth_token`, `ngrok_domain`, `ngrok_enabled`), and global alert dispatch toggle.
 4. **Users & Operators (`users`)**: Operator accounts along with salted cryptographic hashes and RBAC privileges.
+5. **Telemetry & Incidents (`telemetry`)**: Historical events, origins, severity levels, messages, and timestamps.
+6. **Security Audit Logs (`security_audit_logs`)**: Administrative actions, authentication history, and operator IP addresses.
+7. **Alert Dispatch Logs (`alert_dispatch_logs`)**: Notification delivery history, channel statuses, and failure reasons.
+8. **Device State Transitions (`device_state_transitions`)**: Availability history, state changes (ONLINE/OFFLINE), and recorded downtime durations.
 
 The migrator leverages database transactions and conflict resolution clauses to ensure **idempotency** (preventing duplicate entries in target databases).
 
