@@ -59,3 +59,12 @@ Designed to operate seamlessly on **GitHub** and as an **[Obsidian](https://obsi
                     │ (PostgreSQL <-> SQLite) │
                     └─────────────────────────┘
 ```
+
+---
+
+<div align="center">
+  <img src="assets/noxfort-logo.png" alt="Noxfort Systems Logo" width="45" /><br/>
+  <b>Noxfort Systems</b> — <i>A State Of Art Company</i><br/>
+  <i>Industrial Telemetry & Observability • Noxfort Monitor™ Server v2.0</i><br/>
+  <small>Licensed under the <a href="../LICENSE">GNU Affero General Public License v3.0 or later</a> (SPDX: <code>AGPL-3.0-or-later</code>). © 2026 Noxfort Systems.</small>
+</div>

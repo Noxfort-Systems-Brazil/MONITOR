@@ -1,0 +1,58 @@
+# Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
+# Copyright (C) 2026 Noxfort Systems
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "noxfort-monitor"
+version = "2.0.1"
+description = "Industrial Telemetry Ingestion, Observability & Incident Response Orchestration"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [
+    { name = "Gabriel Moraes", email = "suporte@noxfort.com" },
+    { name = "Noxfort Systems", email = "contato@noxfort.com" }
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: X11 Applications",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Networking :: Monitoring",
+]
+dependencies = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.5.0",
+    "pymdown-extensions>=10.7"
+]
+
+[project.urls]
+Homepage = "https://github.com/Noxfort-Systems-Brazil/MONITOR"
+Documentation = "https://github.com/Noxfort-Systems-Brazil/MONITOR#readme"
+Repository = "https://github.com/Noxfort-Systems-Brazil/MONITOR.git"
+"Issue Tracker" = "https://github.com/Noxfort-Systems-Brazil/MONITOR/issues"

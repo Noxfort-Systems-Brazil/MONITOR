@@ -2,12 +2,13 @@
 # Noxfort Monitor™ — MkDocs Configuration (Material for MkDocs)
 # Industrial Telemetry Ingestion, Observability & Incident Response Orchestration
 # Copyright (C) 2026 — Noxfort Systems
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # ==============================================================================
 
 site_name: "Noxfort Monitor™ — Technical Documentation"
 site_description: "Internal technical documentation for Noxfort Monitor — Industrial Telemetry Ingestion, Observability & Incident Response Orchestration."
 site_author: "Gabriel Moraes — Noxfort Systems"
-copyright: "Copyright &copy; 2026 — Noxfort Systems"
+copyright: "Copyright &copy; 2026 — Noxfort Systems &bull; <a href='https://spdx.org/licenses/AGPL-3.0-or-later.html' target='_blank' rel='noopener'>AGPL-3.0-or-later</a>"
 
 # ==============================================================================
 # Theme

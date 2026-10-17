@@ -149,7 +149,7 @@ graph TD
 
 ### 1. Core & Architecture
 * 🏗️ **[System Architecture](../ARCHITECTURE.md)**: Macro view of the Event-Driven Architecture (EDA), dependency injection in `cmd/server/main.go`, goroutine concurrency model, and SOLID layers.
-* 📖 **[Project Overview (README)](../README.md)**: Executive summary, key features, multi-language switcher, quickstart setup, and AGPL v3 licensing.
+* 📖 **[Project Overview (README)](../README.md)**: Executive summary, key features, multi-language switcher, quickstart setup, and AGPL-3.0-or-later (SPDX) licensing.
 * 🌐 **[Multi-Language Documentation Hub](README.md)**: Cross-language matrix linking guides in English, Portuguese, Spanish, French, Russian, and Mandarin.
 * 🤝 **[Contributing Guide](../CONTRIBUTING.md)**: Go code standards, pull request workflow, and architectural rules.
 
@@ -221,5 +221,6 @@ graph TD
 <div align="center">
   <img src="assets/noxfort-logo.png" alt="Noxfort Systems Logo" width="45" /><br/>
   <b>Noxfort Systems</b> — <i>A State Of Art Company</i><br/>
-  <i>Industrial Telemetry & Observability • Noxfort Monitor™ Server v2.0</i>
+  <i>Industrial Telemetry & Observability • Noxfort Monitor™ Server v2.0</i><br/>
+  <small>Licensed under the <a href="../LICENSE">GNU Affero General Public License v3.0 or later</a> (SPDX: <code>AGPL-3.0-or-later</code>). © 2026 Noxfort Systems.</small>
 </div>

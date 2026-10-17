@@ -210,3 +210,11 @@ graph TD
 * 🖥️ [Desktop Application](docs/DESKTOP_APP.md) — Wails v2 runtime and Headless mode
 * 🔍 [Audit Trail](docs/AUDIT_TRAIL.md) — Compliance and audit tracking model
 * 📡 [API Reference](docs/API_REFERENCE.md) — REST and MQTT contracts
+
+---
+
+<div align="center">
+  <img src="docs/assets/noxfort-logo.png" alt="Noxfort Systems Logo" width="45" /><br/>
+  <b>Noxfort Systems</b> — <i>A State Of Art Company</i><br/>
+  <small>Licensed under the <a href="LICENSE">GNU Affero General Public License v3.0 or later</a> (SPDX: <code>AGPL-3.0-or-later</code>). © 2026 Noxfort Systems.</small>
+</div>

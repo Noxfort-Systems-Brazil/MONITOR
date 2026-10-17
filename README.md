@@ -10,7 +10,7 @@
 [![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Platform](https://img.shields.io/badge/Platform-Ubuntu_22.04_LTS-E95420?style=flat&logo=ubuntu&logoColor=white)]()
 [![Desktop](https://img.shields.io/badge/GUI-Wails_v2-df0000?style=flat)]()
-[![License](https://img.shields.io/badge/License-AGPL_v3-blue?style=flat)](LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 [![Noxfort Monitor GitHub Repository Card](https://github-readme-stats.vercel.app/api/pin/?username=Noxfort-Systems-Brazil&repo=MONITOR&theme=dark)](https://github.com/Noxfort-Systems-Brazil/MONITOR)
 
@@ -149,5 +149,5 @@ sudo dpkg -i build_deb/noxfort-monitor_2.0.1_amd64.deb
   <img src="docs/assets/noxfort-logo.png" alt="Noxfort Systems Logo" width="48" /><br/>
   <b>Noxfort Systems</b> — <i>A State Of Art Company</i><br/>
   <i>Industrial Telemetry Ingestion, Observability & Incident Response Orchestration • Noxfort Monitor™ Server v2.0</i><br/>
-  <small>Licensed under the <a href="LICENSE">GNU Affero General Public License v3.0</a>. © 2026 Noxfort Systems.</small>
+  <small>Licensed under the <a href="LICENSE">GNU Affero General Public License v3.0 or later</a> (SPDX: <code>AGPL-3.0-or-later</code>). © 2026 Noxfort Systems.</small>
 </div>

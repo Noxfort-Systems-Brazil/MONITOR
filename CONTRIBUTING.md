@@ -55,9 +55,27 @@ Refer to the **[Advanced Developer Guide](docs/DEVELOPER_GUIDES.md)** for detail
 
 ---
 
+## 4. Licensing & SPDX Standard
+
+All source code files, configurations, and documentation must adhere to the **SPDX** standard:
+* **SPDX License Identifier**: `SPDX-License-Identifier: AGPL-3.0-or-later`
+* **Canonical License**: [GNU Affero General Public License v3.0 or later](LICENSE)
+* When contributing new source files or documentation, include the standard Noxfort copyright header and SPDX identifier tag.
+* In package and project metadata (`pyproject.toml`, `package.json`), always declare the license identifier directly as `AGPL-3.0-or-later`.
+
+---
+
 ### 🔗 Related Documentation
 * 🏗️ [System Architecture](ARCHITECTURE.md) — Macro-level system structure
 * 👨‍💻 [Developer Guide](docs/DEVELOPER_GUIDES.md) — Local environment configuration
 * 🧪 [Testing Guide](docs/TESTING.md) — Running unit and manual tests
 * 🔐 [Security & RBAC](docs/SECURITY.md) — Authentication standards and route protection
 * 🧭 [Documentation Hub](docs/INDEX.md) — Comprehensive content map
+
+---
+
+<div align="center">
+  <img src="docs/assets/noxfort-logo.png" alt="Noxfort Systems Logo" width="45" /><br/>
+  <b>Noxfort Systems</b> — <i>A State Of Art Company</i><br/>
+  <small>Licensed under the <a href="LICENSE">GNU Affero General Public License v3.0 or later</a> (SPDX: <code>AGPL-3.0-or-later</code>). © 2026 Noxfort Systems.</small>
+</div>

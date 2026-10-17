@@ -10,7 +10,7 @@
 [![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Platform](https://img.shields.io/badge/Platform-Ubuntu_22.04_LTS-E95420?style=flat&logo=ubuntu&logoColor=white)]()
 [![Desktop](https://img.shields.io/badge/GUI-Wails_v2-df0000?style=flat)]()
-[![License](https://img.shields.io/badge/License-AGPL_v3-blue?style=flat)](../../LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](../../LICENSE)
 
 ---
 
@@ -46,5 +46,6 @@ This directory contains the canonical **English** technical documentation suite 
 <div align="center">
   <img src="../assets/noxfort-logo.png" alt="Noxfort Systems Logo" width="45" /><br/>
   <b>Noxfort Systems</b> — <i>A State Of Art Company</i><br/>
-  <i>Industrial Telemetry & Observability • Noxfort Monitor™ Server v2.0</i>
+  <i>Industrial Telemetry & Observability • Noxfort Monitor™ Server v2.0</i><br/>
+  <small>Licensed under the <a href="../../LICENSE">GNU Affero General Public License v3.0 or later</a> (SPDX: <code>AGPL-3.0-or-later</code>). © 2026 Noxfort Systems.</small>
 </div>
