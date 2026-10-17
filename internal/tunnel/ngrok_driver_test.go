@@ -16,7 +16,7 @@
 //
 // File: internal/tunnel/ngrok_driver_test.go
 // Author: Gabriel Moraes
-// Date: 2026-09-04
+// Date: October 2026
 
 package tunnel
 

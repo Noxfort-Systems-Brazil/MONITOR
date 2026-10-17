@@ -16,7 +16,7 @@
 //
 // File: web/static/js/password_meter.js
 // Author: Gabriel Moraes
-// Date: 2026-10-06
+// Date: October 2026
 
 (function (root, factory) {
     if (typeof module === 'object' && module.exports) {

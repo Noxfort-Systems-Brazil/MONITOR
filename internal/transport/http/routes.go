@@ -6,10 +6,17 @@
 // published by the Free Software Foundation, either version 3 of the
 // License, or (at your option) any later version.
 //
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
 // File: internal/transport/http/routes.go
 // Author: Gabriel Moraes
-// Date: 2026-09-14
-// Description: HTTP route declarations and multiplexer setup for the desktop application.
+// Date: October 2026
 
 package http
 
@@ -45,7 +52,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/auth/logout", s.authHandler.HandleLogout)
 	mux.HandleFunc("/api/auth/status", s.authHandler.HandleStatus)
 
-	// 3. IoT Telemetry API (HTTP POST Ingest)
+	// 3. IoT Telemetry & Pairing API (HTTP POST Ingest)
+	mux.HandleFunc("/api/pair", s.telemetryHandler.HandlePair)
 	mux.HandleFunc("/api/telemetry", s.telemetryHandler.HandleIngest)
 
 	// 4. Protected Application Routes

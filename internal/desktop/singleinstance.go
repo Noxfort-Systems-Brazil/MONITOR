@@ -16,7 +16,7 @@
 //
 // File: internal/desktop/singleinstance.go
 // Author: Gabriel Moraes
-// Date: 2026-09-03
+// Date: October 2026
 
 package desktop
 

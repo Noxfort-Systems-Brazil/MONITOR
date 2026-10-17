@@ -16,7 +16,7 @@
 //
 // File: web/static/js/i18n.js
 // Author: Gabriel Moraes
-// Date: 2026-01-19
+// Date: October 2026
 
 /**
  * Noxfort Monitor - Client-Side Internationalization (i18n) Engine

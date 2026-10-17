@@ -16,8 +16,7 @@
 //
 // File: internal/storage/backup.go
 // Author: Gabriel Moraes
-// Date: 2026-09-28
-// Description: Automated, non-blocking database backup engine with rotation and integrity preservation.
+// Date: October 2026
 
 package storage
 

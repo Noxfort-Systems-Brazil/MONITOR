@@ -16,8 +16,7 @@
 //
 // File: internal/transport/http/user_handler.go
 // Author: Gabriel Moraes
-// Date: 2026-09-03
-// Modified: 2026-09-04 (SOLID Refactor)
+// Date: October 2026
 
 package http
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
 # Copyright (C) 2026 Noxfort Systems
 #
@@ -18,9 +17,7 @@
 #
 # File: scripts/backup.sh
 # Author: Gabriel Moraes
-# Date: 2026-09-28
-# Description: Database Backup CLI Script (supports standalone SQLite and PostgreSQL)
-# ==============================================================================
+# Date: October 2026
 
 set -euo pipefail
 

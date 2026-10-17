@@ -16,8 +16,7 @@
 //
 // File: internal/monitor/engine.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
-// Modified: 2026-09-04 (SOLID Refactor)
+// Date: October 2026
 
 package monitor
 
@@ -117,7 +116,7 @@ func (e *Engine) PreseedInitialStatus() {
 	}
 
 	for _, dev := range devices {
-		if !dev.Enabled {
+		if dev.Status == "PENDING" || !dev.Enabled {
 			continue
 		}
 		if time.Since(dev.LastSeen) > e.config.OfflineThreshold {
@@ -166,6 +165,13 @@ func (e *Engine) CheckSystemsOnce() {
 		return
 	}
 
+	// Clean up any pending pairing requests that exceeded their TTL
+	if cleaner, ok := e.devices.(interface{ CleanupExpiredPending() error }); ok {
+		if err := cleaner.CleanupExpiredPending(); err != nil {
+			log.Printf("[ENGINE] Warning: error cleaning up expired pairing sessions: %v", err)
+		}
+	}
+
 	devices, err := e.devices.GetAllDevices()
 	if err != nil {
 		log.Printf("[ENGINE] Failed to query devices: %v", err)
@@ -173,7 +179,7 @@ func (e *Engine) CheckSystemsOnce() {
 	}
 
 	for _, dev := range devices {
-		if !dev.Enabled {
+		if dev.Status == "PENDING" || !dev.Enabled {
 			continue
 		}
 

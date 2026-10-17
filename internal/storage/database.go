@@ -16,7 +16,7 @@
 //
 // File: internal/storage/database.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
+// Date: October 2026
 
 package storage
 
@@ -62,12 +62,15 @@ func NewDatabase(path string) (*sql.DB, error) {
 // initSchema creates the necessary tables if they don't exist.
 func initSchema(db *sql.DB) error {
 	// 1. Devices Table (Simplified V2)
-	// Now tracks 'identifiers' (origins) instead of hardware IDs.
+	// Now tracks 'identifiers' (origins), authentication tokens, and pairing status.
 	queryDevices := `
 	CREATE TABLE IF NOT EXISTS devices (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
 		identifier TEXT UNIQUE NOT NULL, -- Matches JSON "origin" (e.g. "synapse")
+		api_key TEXT DEFAULT '',
+		status TEXT DEFAULT 'ACTIVE',
+		expires_at DATETIME,
 		last_seen DATETIME,
 		enabled BOOLEAN DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -75,6 +78,21 @@ func initSchema(db *sql.DB) error {
 	if _, err := db.Exec(queryDevices); err != nil {
 		return fmt.Errorf("error creating devices table: %w", err)
 	}
+
+	// 1.1 Migrations for devices table
+	migrationsDevices := []string{
+		"ALTER TABLE devices ADD COLUMN api_key TEXT DEFAULT '';",
+		"ALTER TABLE devices ADD COLUMN status TEXT DEFAULT 'ACTIVE';",
+		"ALTER TABLE devices ADD COLUMN expires_at DATETIME;",
+	}
+	for _, m := range migrationsDevices {
+		if _, err := db.Exec(m); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				log.Printf("[STORAGE] Migration Note: %v (Normal if column exists)", err)
+			}
+		}
+	}
+
 
 	// 2. Contacts Table
 	// Roles: "system_admin", "technician", "programmer"

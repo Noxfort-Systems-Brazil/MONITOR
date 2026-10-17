@@ -16,7 +16,7 @@
 //
 // File: internal/transport/http/ip.go
 // Author: Gabriel Moraes
-// Date: 2026-01-20
+// Date: October 2026
 
 package http
 

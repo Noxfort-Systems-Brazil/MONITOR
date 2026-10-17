@@ -16,7 +16,7 @@
 //
 // File: internal/security/env_validator_test.go
 // Author: Gabriel Moraes
-// Date: 2026-09-28
+// Date: October 2026
 
 package security
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
 # Copyright (C) 2026 Noxfort Systems
 #
@@ -18,9 +17,7 @@
 #
 # File: scripts/setup_mqtt_auth.sh
 # Author: Gabriel Moraes
-# Date: 2026-09-28
-# Description: Generates and manages the Mosquitto password file with secure PBKDF2 hashing.
-# ==============================================================================
+# Date: October 2026
 
 set -euo pipefail
 

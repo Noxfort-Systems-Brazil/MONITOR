@@ -16,7 +16,7 @@
 //
 // File: web/static/js/__tests__/password_meter.test.js
 // Author: Gabriel Moraes
-// Date: 2026-10-06
+// Date: October 2026
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import PasswordStrengthMeter from '../password_meter.js';

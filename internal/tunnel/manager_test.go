@@ -16,8 +16,7 @@
 //
 // File: internal/tunnel/manager_test.go
 // Author: Gabriel Moraes
-// Date: 2026-09-04
-// Modified: 2026-09-04 (SOLID: MockDriver isolation testing)
+// Date: October 2026
 
 package tunnel
 

@@ -16,7 +16,7 @@
 //
 // File: internal/domain/device.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
+// Date: October 2026
 
 package domain
 
@@ -41,6 +41,15 @@ type Device struct {
 
 	// Enabled allows ignoring a system during maintenance.
 	Enabled bool `json:"enabled"`
+
+	// ApiKey holds the secret authentication token for the device.
+	ApiKey string `json:"api_key,omitempty"`
+
+	// Status represents the onboarding state: 'PENDING' or 'ACTIVE'.
+	Status string `json:"status"`
+
+	// ExpiresAt marks when a pending pairing request expires (5 minutes TTL).
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // DeviceRepository defines the contract for persisting system states.
@@ -48,10 +57,26 @@ type DeviceRepository interface {
 	// GetAllDevices returns all monitored systems.
 	GetAllDevices() ([]Device, error)
 
+	// GetByIdentifier retrieves a device by its unique origin/identifier.
+	GetByIdentifier(identifier string) (*Device, error)
+
 	// UpdateLastSeen updates the heartbeat using the identifier (origin).
 	UpdateLastSeen(identifier string, seenAt time.Time) error
+
+	// CreateOrUpdatePending stores a device in PENDING status with an API key and TTL.
+	CreateOrUpdatePending(device *Device) error
+
+	// ActivateDevice confirms the API key within the TTL and moves status to ACTIVE.
+	ActivateDevice(identifier string, token string) (bool, error)
+
+	// ValidateToken checks if the device is ACTIVE and if the token is valid.
+	ValidateToken(identifier string, token string) (bool, error)
+
+	// CleanupExpiredPending deletes pending pairing records that exceeded their TTL.
+	CleanupExpiredPending() error
 
 	// DeleteDevice removes a system from monitoring.
 	// We use the identifier (string) as the key for deletion.
 	DeleteDevice(identifier string) error
 }
+

@@ -16,7 +16,7 @@
 //
 // File: internal/transport/http/metrics_handler_test.go
 // Author: Gabriel Moraes
-// Date: 2026-09-28
+// Date: October 2026
 
 package http
 

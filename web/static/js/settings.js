@@ -16,7 +16,7 @@
 //
 // File: web/static/js/settings.js
 // Author: Gabriel Moraes
-// Date: 2026-09-04
+// Date: October 2026
 
 document.addEventListener('DOMContentLoaded', function () {
 

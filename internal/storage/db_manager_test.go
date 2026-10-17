@@ -16,7 +16,7 @@
 //
 // File: internal/storage/db_manager_test.go
 // Author: Gabriel Moraes
-// Date: 2026-09-05
+// Date: October 2026
 
 package storage
 

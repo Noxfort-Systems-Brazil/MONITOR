@@ -16,8 +16,7 @@
 //
 // File: internal/tunnel/duckdns_driver.go
 // Author: Gabriel Moraes
-// Date: 2026-09-13
-// Description: Pure Go DDNS provider implementing tunnel.Driver for DuckDNS.
+// Date: October 2026
 
 package tunnel
 

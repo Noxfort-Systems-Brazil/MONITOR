@@ -1,3 +1,23 @@
+// Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
+// Copyright (C) 2026 Noxfort Systems
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// File: internal/transport/http/device_handler_test.go
+// Author: Gabriel Moraes
+// Date: October 2026
+
 package http
 
 import (
@@ -26,6 +46,31 @@ func (m *mockDeviceRepoForHandler) UpdateLastSeen(identifier string, lastSeen ti
 
 func (m *mockDeviceRepoForHandler) DeleteDevice(identifier string) error {
 	m.deleted = identifier
+	return nil
+}
+
+func (m *mockDeviceRepoForHandler) GetByIdentifier(identifier string) (*domain.Device, error) {
+	for _, d := range m.devices {
+		if d.Identifier == identifier {
+			return &d, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockDeviceRepoForHandler) CreateOrUpdatePending(device *domain.Device) error {
+	return nil
+}
+
+func (m *mockDeviceRepoForHandler) ActivateDevice(identifier string, token string) (bool, error) {
+	return true, nil
+}
+
+func (m *mockDeviceRepoForHandler) ValidateToken(identifier string, token string) (bool, error) {
+	return true, nil
+}
+
+func (m *mockDeviceRepoForHandler) CleanupExpiredPending() error {
 	return nil
 }
 

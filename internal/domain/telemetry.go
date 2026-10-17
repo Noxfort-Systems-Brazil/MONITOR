@@ -16,7 +16,7 @@
 //
 // File: internal/domain/telemetry.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
+// Date: October 2026
 
 package domain
 

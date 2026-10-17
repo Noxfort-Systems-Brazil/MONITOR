@@ -16,7 +16,7 @@
 //
 // File: internal/domain/incident.go
 // Author: Gabriel Moraes
-// Date: 2026-01-16
+// Date: October 2026
 
 package domain
 

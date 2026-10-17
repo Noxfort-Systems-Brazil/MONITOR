@@ -16,7 +16,7 @@
 //
 // File: internal/transport/http/contact_handler_test.go
 // Author: Gabriel Moraes
-// Date: 2026-01-20
+// Date: October 2026
 
 package http
 

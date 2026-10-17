@@ -16,8 +16,7 @@
 //
 // File: internal/transport/http/tunnel_handler.go
 // Author: Gabriel Moraes
-// Date: 2026-09-04
-// Modified: 2026-09-14 (SOLID Refactor: Interface Segregation, DRY & Lean Transport)
+// Date: October 2026
 
 package http
 

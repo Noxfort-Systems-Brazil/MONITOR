@@ -16,8 +16,7 @@
 //
 // File: internal/tunnel/duckdns_driver_test.go
 // Author: Gabriel Moraes
-// Date: 2026-09-13
-// Description: Unit tests for DuckDNSDriver.
+// Date: October 2026
 
 package tunnel
 

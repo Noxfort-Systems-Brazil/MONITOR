@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
 # Copyright (C) 2026 Noxfort Systems
 #
@@ -18,9 +17,7 @@
 #
 # File: scripts/build_deb.sh
 # Author: Gabriel Moraes
-# Date: 2026-03-20
-# Description: Builds a self-contained Debian package (.deb) for Noxfort Monitor
-# ==============================================================================
+# Date: October 2026
 
 set -e
 

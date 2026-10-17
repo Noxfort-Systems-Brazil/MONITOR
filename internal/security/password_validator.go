@@ -16,7 +16,7 @@
 //
 // File: internal/security/password_validator.go
 // Author: Gabriel Moraes
-// Date: 2026-10-06
+// Date: October 2026
 
 package security
 

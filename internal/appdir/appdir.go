@@ -16,10 +16,7 @@
 //
 // File: internal/appdir/appdir.go
 // Author: Gabriel Moraes
-// Date: 2026-01-20
-//
-// Resolves the application's asset root directory.
-// Priority: NOXFORT_HOME env var → directory of the running executable → working directory.
+// Date: October 2026
 
 package appdir
 

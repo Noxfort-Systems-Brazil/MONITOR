@@ -16,8 +16,7 @@
 //
 // File: internal/tunnel/manager.go
 // Author: Gabriel Moraes
-// Date: 2026-09-04
-// Modified: 2026-09-04 (SOLID Refactor: Pure State Orchestrator & Dependency Injection)
+// Date: October 2026
 
 package tunnel
 

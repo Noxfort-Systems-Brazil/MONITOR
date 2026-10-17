@@ -16,7 +16,7 @@
 //
 // File: web/static/js/app.js
 // Author: Gabriel Moraes
-// Date: 2026-01-17
+// Date: October 2026
 
 document.addEventListener("DOMContentLoaded", function () {
     // 1. Initialize Bootstrap Tooltips

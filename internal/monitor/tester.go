@@ -16,7 +16,7 @@
 //
 // File: internal/monitor/tester.go
 // Author: Gabriel Moraes
-// Date: 2026-09-05 (SOLID Refactor: SRP Separation of Diagnostic Testing)
+// Date: October 2026
 
 package monitor
 

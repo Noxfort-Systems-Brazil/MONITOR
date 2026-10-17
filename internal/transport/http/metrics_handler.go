@@ -16,8 +16,7 @@
 //
 // File: internal/transport/http/metrics_handler.go
 // Author: Gabriel Moraes
-// Date: 2026-09-28
-// Description: Prometheus-compatible metrics exporter endpoint (/metrics).
+// Date: October 2026
 
 package http
 

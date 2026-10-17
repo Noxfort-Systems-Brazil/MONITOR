@@ -16,7 +16,7 @@
 //
 // File: web/static/js/__tests__/settings_db_api.test.js
 // Author: Gabriel Moraes
-// Date: 2026-09-28
+// Date: October 2026
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'node:fs';

@@ -16,8 +16,7 @@
 //
 // File: internal/transport/http/health_handler.go
 // Author: Gabriel Moraes
-// Date: 2026-09-28
-// Description: Automated application health checks and diagnostic telemetry endpoint.
+// Date: October 2026
 
 package http
 

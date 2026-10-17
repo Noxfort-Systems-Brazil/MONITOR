@@ -6,10 +6,17 @@
 // published by the Free Software Foundation, either version 3 of the
 // License, or (at your option) any later version.
 //
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
 // File: internal/storage/device_repo.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
-// Modified: 2026-09-04 (PostgreSQL & Hot-Reload Support)
+// Date: October 2026
 
 package storage
 
@@ -76,7 +83,7 @@ func (r *DeviceRepository) GetAllDevices() ([]domain.Device, error) {
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	query := `SELECT id, name, identifier, last_seen, enabled FROM devices ORDER BY name ASC;`
+	query := `SELECT id, name, identifier, api_key, status, expires_at, last_seen, enabled FROM devices ORDER BY name ASC;`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query devices: %w", err)
@@ -86,12 +93,26 @@ func (r *DeviceRepository) GetAllDevices() ([]domain.Device, error) {
 	var devices []domain.Device
 	for rows.Next() {
 		var d domain.Device
+		var apiKey sql.NullString
+		var status sql.NullString
+		var expiresAt sql.NullTime
 		var lastSeen sql.NullTime
 
-		if err := rows.Scan(&d.ID, &d.Name, &d.Identifier, &lastSeen, &d.Enabled); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Identifier, &apiKey, &status, &expiresAt, &lastSeen, &d.Enabled); err != nil {
 			return nil, err
 		}
 
+		if apiKey.Valid {
+			d.ApiKey = apiKey.String
+		}
+		if status.Valid && status.String != "" {
+			d.Status = status.String
+		} else {
+			d.Status = "ACTIVE"
+		}
+		if expiresAt.Valid {
+			d.ExpiresAt = &expiresAt.Time
+		}
 		if lastSeen.Valid {
 			d.LastSeen = lastSeen.Time
 		}
@@ -108,6 +129,175 @@ func (r *DeviceRepository) GetAllDevices() ([]domain.Device, error) {
 	r.debounceMu.Unlock()
 
 	return devices, nil
+}
+
+// GetByIdentifier retrieves a single device by its origin/identifier.
+func (r *DeviceRepository) GetByIdentifier(identifier string) (*domain.Device, error) {
+	db, driver := r.getDB()
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	query := AdaptQuery(`SELECT id, name, identifier, api_key, status, expires_at, last_seen, enabled FROM devices WHERE identifier = ? LIMIT 1;`, driver)
+	row := db.QueryRow(query, identifier)
+
+	var d domain.Device
+	var apiKey sql.NullString
+	var status sql.NullString
+	var expiresAt sql.NullTime
+	var lastSeen sql.NullTime
+
+	if err := row.Scan(&d.ID, &d.Name, &d.Identifier, &apiKey, &status, &expiresAt, &lastSeen, &d.Enabled); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get device %s: %w", identifier, err)
+	}
+
+	if apiKey.Valid {
+		d.ApiKey = apiKey.String
+	}
+	if status.Valid && status.String != "" {
+		d.Status = status.String
+	} else {
+		d.Status = "ACTIVE"
+	}
+	if expiresAt.Valid {
+		d.ExpiresAt = &expiresAt.Time
+	}
+	if lastSeen.Valid {
+		d.LastSeen = lastSeen.Time
+	}
+
+	r.debounceMu.Lock()
+	if cached, ok := r.lastPersisted[identifier]; ok && cached.After(d.LastSeen) {
+		d.LastSeen = cached
+	}
+	r.debounceMu.Unlock()
+
+	return &d, nil
+}
+
+// CreateOrUpdatePending stores a device in PENDING state with its secret API key and expiration TTL.
+func (r *DeviceRepository) CreateOrUpdatePending(device *domain.Device) error {
+	db, driver := r.getDB()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	query := `
+	INSERT INTO devices (name, identifier, api_key, status, expires_at, enabled)
+	VALUES (?, ?, ?, 'PENDING', ?, 1)
+	ON CONFLICT(identifier) DO UPDATE SET
+		name = excluded.name,
+		api_key = excluded.api_key,
+		status = 'PENDING',
+		expires_at = excluded.expires_at,
+		enabled = 1;
+	`
+	if driver == "postgres" {
+		query = `
+		INSERT INTO devices (name, identifier, api_key, status, expires_at, enabled)
+		VALUES ($1, $2, $3, 'PENDING', $4, TRUE)
+		ON CONFLICT(identifier) DO UPDATE SET
+			name = EXCLUDED.name,
+			api_key = EXCLUDED.api_key,
+			status = 'PENDING',
+			expires_at = EXCLUDED.expires_at,
+			enabled = TRUE;
+		`
+	}
+
+	_, err := db.Exec(query, device.Name, device.Identifier, device.ApiKey, device.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("failed to register pending device %s: %w", device.Identifier, err)
+	}
+	return nil
+}
+
+// ActivateDevice verifies if the device is pending, validates the token and timestamp, and promotes it to ACTIVE.
+func (r *DeviceRepository) ActivateDevice(identifier string, token string) (bool, error) {
+	device, err := r.GetByIdentifier(identifier)
+	if err != nil {
+		return false, err
+	}
+	if device == nil {
+		return false, nil
+	}
+
+	// Verify token match
+	if device.ApiKey != token {
+		return false, nil
+	}
+
+	// If already active, it's valid
+	if device.Status == "ACTIVE" {
+		return true, nil
+	}
+
+	// If pending, check expiration TTL
+	if device.Status == "PENDING" {
+		if device.ExpiresAt != nil && time.Now().After(*device.ExpiresAt) {
+			// TTL exceeded: clean up expired entry
+			_ = r.DeleteDevice(identifier)
+			return false, fmt.Errorf("pairing session expired")
+		}
+
+		db, driver := r.getDB()
+		if db == nil {
+			return false, fmt.Errorf("database not initialized")
+		}
+
+		now := time.Now()
+		query := AdaptQuery(`UPDATE devices SET status = 'ACTIVE', expires_at = NULL, last_seen = ? WHERE identifier = ?;`, driver)
+		if _, err := db.Exec(query, now, identifier); err != nil {
+			return false, fmt.Errorf("failed to activate device %s: %w", identifier, err)
+		}
+
+		r.debounceMu.Lock()
+		if r.lastPersisted != nil {
+			r.lastPersisted[identifier] = now
+		}
+		r.debounceMu.Unlock()
+
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// ValidateToken verifies that a device exists, is enabled, is ACTIVE, and possesses the matching API key.
+func (r *DeviceRepository) ValidateToken(identifier string, token string) (bool, error) {
+	device, err := r.GetByIdentifier(identifier)
+	if err != nil {
+		return false, err
+	}
+	if device == nil || !device.Enabled {
+		return false, nil
+	}
+
+	// If the device has no API key set (legacy dev environment), allow it
+	if device.ApiKey == "" {
+		return true, nil
+	}
+
+	if device.Status == "ACTIVE" && device.ApiKey == token {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// CleanupExpiredPending deletes any devices remaining in PENDING state after their TTL.
+func (r *DeviceRepository) CleanupExpiredPending() error {
+	db, driver := r.getDB()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	query := AdaptQuery(`DELETE FROM devices WHERE status = 'PENDING' AND expires_at IS NOT NULL AND expires_at < ?;`, driver)
+	_, err := db.Exec(query, time.Now())
+	return err
 }
 
 // UpdateLastSeen updates the heartbeat for a specific system.
@@ -149,14 +339,14 @@ func (r *DeviceRepository) ForceUpdateLastSeen(identifier string, seenAt time.Ti
 	}
 
 	query := `
-	INSERT INTO devices (name, identifier, last_seen, enabled)
-	VALUES (?, ?, ?, 1)
+	INSERT INTO devices (name, identifier, status, last_seen, enabled)
+	VALUES (?, ?, 'ACTIVE', ?, 1)
 	ON CONFLICT(identifier) DO UPDATE SET last_seen = excluded.last_seen, enabled = 1;
 	`
 	if driver == "postgres" {
 		query = `
-		INSERT INTO devices (name, identifier, last_seen, enabled)
-		VALUES ($1, $2, $3, TRUE)
+		INSERT INTO devices (name, identifier, status, last_seen, enabled)
+		VALUES ($1, $2, 'ACTIVE', $3, TRUE)
 		ON CONFLICT(identifier) DO UPDATE SET last_seen = EXCLUDED.last_seen, enabled = TRUE;
 		`
 	}
@@ -188,3 +378,4 @@ func (r *DeviceRepository) DeleteDevice(identifier string) error {
 	_, err := db.Exec(query, identifier)
 	return err
 }
+

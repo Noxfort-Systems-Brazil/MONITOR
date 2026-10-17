@@ -16,7 +16,7 @@
 //
 // File: internal/monitor/telegram_channel.go
 // Author: Gabriel Moraes
-// Date: 2026-09-04
+// Date: October 2026
 
 package monitor
 

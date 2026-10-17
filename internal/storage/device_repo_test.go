@@ -16,7 +16,7 @@
 //
 // File: internal/storage/device_repo_test.go
 // Author: Gabriel Moraes
-// Date: 2026-09-05
+// Date: October 2026
 
 package storage
 
@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"noxfort-monitor-server/internal/domain"
 
 	_ "modernc.org/sqlite"
 )
@@ -125,3 +127,112 @@ func TestDeviceRepository_DebouncedHeartbeat(t *testing.T) {
 		t.Errorf("Expected 0 devices after deletion, got %d", len(devices))
 	}
 }
+
+func TestDeviceRepository_PairingAndTokens(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewDeviceRepository(db)
+
+	// 1. Register a pending device
+	expiresAt := time.Now().Add(5 * time.Minute)
+	pendingDev := &domain.Device{
+		Identifier: "carina-test-01",
+		Name:       "Carina Test Node",
+		ApiKey:     "nox_live_test_token_12345",
+		Status:     "PENDING",
+		ExpiresAt:  &expiresAt,
+		Enabled:    true,
+	}
+
+	if err := repo.CreateOrUpdatePending(pendingDev); err != nil {
+		t.Fatalf("Failed to create pending device: %v", err)
+	}
+
+	// 2. Fetch and assert pending status
+	fetched, err := repo.GetByIdentifier("carina-test-01")
+	if err != nil {
+		t.Fatalf("Failed to get device: %v", err)
+	}
+	if fetched == nil {
+		t.Fatal("Expected device to be found, got nil")
+	}
+	if fetched.Status != "PENDING" {
+		t.Errorf("Expected status PENDING, got %s", fetched.Status)
+	}
+	if fetched.ApiKey != "nox_live_test_token_12345" {
+		t.Errorf("Expected token nox_live_test_token_12345, got %s", fetched.ApiKey)
+	}
+
+	// 3. ValidateToken should fail while still PENDING
+	valid, err := repo.ValidateToken("carina-test-01", "nox_live_test_token_12345")
+	if err != nil {
+		t.Fatalf("ValidateToken error: %v", err)
+	}
+	if valid {
+		t.Error("Expected ValidateToken to be false for PENDING device")
+	}
+
+	// 4. Try activating with WRONG token
+	activated, err := repo.ActivateDevice("carina-test-01", "wrong_token")
+	if err != nil {
+		t.Fatalf("ActivateDevice error: %v", err)
+	}
+	if activated {
+		t.Error("Expected ActivateDevice to fail with wrong token")
+	}
+
+	// 5. Activate with CORRECT token
+	activated, err = repo.ActivateDevice("carina-test-01", "nox_live_test_token_12345")
+	if err != nil {
+		t.Fatalf("ActivateDevice error: %v", err)
+	}
+	if !activated {
+		t.Error("Expected ActivateDevice to succeed with correct token")
+	}
+
+	// 6. Assert status is now ACTIVE
+	activeDev, err := repo.GetByIdentifier("carina-test-01")
+	if err != nil || activeDev == nil {
+		t.Fatalf("Failed to get activated device: %v", err)
+	}
+	if activeDev.Status != "ACTIVE" {
+		t.Errorf("Expected status ACTIVE, got %s", activeDev.Status)
+	}
+
+	// 7. ValidateToken should now succeed
+	valid, err = repo.ValidateToken("carina-test-01", "nox_live_test_token_12345")
+	if err != nil {
+		t.Fatalf("ValidateToken error: %v", err)
+	}
+	if !valid {
+		t.Error("Expected ValidateToken to be true for ACTIVE device with correct token")
+	}
+
+	// 8. Test CleanupExpiredPending
+	past := time.Now().Add(-10 * time.Minute)
+	expiredDev := &domain.Device{
+		Identifier: "expired-node",
+		Name:       "Expired Node",
+		ApiKey:     "nox_live_expired",
+		Status:     "PENDING",
+		ExpiresAt:  &past,
+		Enabled:    true,
+	}
+	if err := repo.CreateOrUpdatePending(expiredDev); err != nil {
+		t.Fatalf("Failed to create expired pending device: %v", err)
+	}
+
+	if err := repo.CleanupExpiredPending(); err != nil {
+		t.Fatalf("CleanupExpiredPending error: %v", err)
+	}
+
+	cleaned, err := repo.GetByIdentifier("expired-node")
+	if err != nil {
+		t.Fatalf("GetByIdentifier error: %v", err)
+	}
+	if cleaned != nil {
+		t.Error("Expected expired pending device to be cleaned up, but it still exists")
+	}
+}
+

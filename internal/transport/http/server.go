@@ -16,8 +16,7 @@
 //
 // File: internal/transport/http/server.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
-// Modified: 2026-09-04 (SOLID Refactor)
+// Date: October 2026
 
 package http
 
@@ -111,7 +110,7 @@ func NewServer(
 		auditHandler:     auditH,
 		authHandler:      authHandler,
 		userHandler:      userHandler,
-		telemetryHandler: NewTelemetryHandler(sm),
+		telemetryHandler: NewTelemetryHandler(sm, dRepo),
 		browserHandler:   NewBrowserHandler(),
 		tunnelHandler:    NewTunnelHandler(sRepo, tm),
 		healthHandler:    healthH,
@@ -143,7 +142,10 @@ func (s *Server) SetBackupService(bs BackupService) {
 func (s *Server) ExternalIngestionHandler() http.Handler {
 	mux := http.NewServeMux()
 
-	// 1. Telemetry Ingestion for field agents (Carina, Synapse, IoT)
+	// 1. Device Pairing Protocol ("O Oi")
+	mux.HandleFunc("/api/pair", s.telemetryHandler.HandlePair)
+
+	// 1a. Telemetry Ingestion for field agents (Carina, Synapse, IoT)
 	mux.HandleFunc("/api/telemetry", s.telemetryHandler.HandleIngest)
 
 	// 1b. Observability & Health Checks (Public / Monitoring Probes)

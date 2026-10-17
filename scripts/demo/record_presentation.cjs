@@ -1,12 +1,22 @@
-/**
- * Noxfort Monitor™ - Automated Presentation Video Generator
- * Copyright (C) 2026 Noxfort Systems
- *
- * Gera gravação de alta fidelidade (1080p @ 60 FPS) do Noxfort Monitor
- * navegando ABA POR ABA, simulando cadastro de usuário ao vivo com
- * medidor de força de senha, injeção de incidente crítico na rede e
- * visualização da trilha de auditoria para apresentações executivas.
- */
+// Noxfort Monitor™ is an open-source industrial telemetry, observability, and incident response orchestration system.
+// Copyright (C) 2026 Noxfort Systems
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
+// File: scripts/demo/record_presentation.cjs
+// Author: Gabriel Moraes
+// Date: October 2026
 
 const { chromium } = require('playwright');
 const { spawn, execSync } = require('child_process');

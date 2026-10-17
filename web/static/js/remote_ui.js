@@ -6,10 +6,17 @@
 // published by the Free Software Foundation, either version 3 of the
 // License, or (at your option) any later version.
 //
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
 // File: web/static/js/remote_ui.js
 // Author: Gabriel Moraes
-// Date: 2026-09-14
-// Description: UI feedback, clipboard copy, and DOM status renderer for remote tunnel management.
+// Date: October 2026
 
 const RemoteUI = {
     showFeedback(message, type = 'success') {

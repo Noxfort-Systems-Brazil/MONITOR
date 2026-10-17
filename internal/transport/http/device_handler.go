@@ -16,7 +16,7 @@
 //
 // File: internal/transport/http/device_handler.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
+// Date: October 2026
 
 package http
 
@@ -65,11 +65,22 @@ func (h *DeviceHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var activeDevices []domain.Device
+	var pendingDevices []domain.Device
+	for _, d := range devices {
+		if d.Status == "PENDING" {
+			pendingDevices = append(pendingDevices, d)
+		} else {
+			activeDevices = append(activeDevices, d)
+		}
+	}
+
 	data := map[string]interface{}{
-		"Title":      "System Management",
-		"Devices":    devices, // Passes the []domain.Device list directly
-		"ServerIP":   pushTarget,
-		"ServerPort": port,
+		"Title":          "System Management",
+		"Devices":        activeDevices,
+		"PendingDevices": pendingDevices,
+		"ServerIP":       pushTarget,
+		"ServerPort":     port,
 	}
 
 	if err := RenderPage(w, "web/templates/devices.html", data); err != nil {

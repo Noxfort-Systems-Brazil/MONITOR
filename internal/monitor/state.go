@@ -16,8 +16,7 @@
 //
 // File: internal/monitor/state.go
 // Author: Gabriel Moraes
-// Date: 2026-01-19
-// Modified: 2026-09-04 (SOLID Refactor)
+// Date: October 2026
 
 package monitor
 

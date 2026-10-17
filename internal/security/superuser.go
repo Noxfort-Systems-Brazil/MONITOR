@@ -16,8 +16,7 @@
 //
 // File: internal/security/superuser.go
 // Author: Gabriel Moraes
-// Date: 2026-09-04
-// Modified: 2026-09-05 (Dynamic .env resolution & Production anti-backdoor protection)
+// Date: October 2026
 
 package security
 

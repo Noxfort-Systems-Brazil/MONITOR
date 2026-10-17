@@ -6,9 +6,17 @@
 // published by the Free Software Foundation, either version 3 of the
 // License, or (at your option) any later version.
 //
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
 // File: internal/storage/postgres_schema.go
 // Author: Gabriel Moraes
-// Date: 2026-09-04
+// Date: October 2026
 
 package storage
 
@@ -56,10 +64,19 @@ func InitPostgresSchema(db *sql.DB, schemaName string) error {
 			id BIGSERIAL PRIMARY KEY,
 			name TEXT NOT NULL,
 			identifier TEXT UNIQUE NOT NULL,
+			api_key TEXT DEFAULT '',
+			status TEXT DEFAULT 'ACTIVE',
+			expires_at TIMESTAMPTZ,
 			last_seen TIMESTAMPTZ,
 			enabled BOOLEAN DEFAULT TRUE,
 			created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 		);`,
+
+		// Devices Migrations (Idempotent)
+		`ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key TEXT DEFAULT '';`,
+		`ALTER TABLE devices ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ACTIVE';`,
+		`ALTER TABLE devices ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;`,
+
 
 		// Contacts
 		`CREATE TABLE IF NOT EXISTS contacts (
