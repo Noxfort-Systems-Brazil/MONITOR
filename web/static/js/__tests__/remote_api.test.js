@@ -87,4 +87,27 @@ describe('RemoteTunnelAPI Client', () => {
         expect(res.ok).toBe(true);
         expect(res.data.url).toBe('https://test.duckdns.org');
     });
+
+    it('saveConfig handles HTTP 403 JSON and non-JSON fallback safely', async () => {
+        global.fetch = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            json: async () => ({ success: false, error: 'Acesso restrito' }),
+        });
+
+        const jsonRes = await api.saveConfig('my-token', 'test');
+        expect(jsonRes.ok).toBe(false);
+        expect(jsonRes.data.error).toBe('Acesso restrito');
+
+        global.fetch = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            json: async () => { throw new SyntaxError('Unexpected token'); },
+            text: async () => 'Acesso restrito em texto puro',
+        });
+
+        const textRes = await api.saveConfig('my-token', 'test');
+        expect(textRes.ok).toBe(false);
+        expect(textRes.data.error).toBe('Acesso restrito em texto puro');
+    });
 });

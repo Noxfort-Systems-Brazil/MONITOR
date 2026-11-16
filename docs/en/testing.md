@@ -1,89 +1,61 @@
-# 🧪 Testing & Quality Assurance (QA)
+# Noxfort Monitor — Testing & Verification Guide
 
-This document specifies testing workflows for **Noxfort Monitor™ v2.0**, covering automated unit tests, in-memory repository mocks, and manual E2E validation via MQTT and HTTP REST.
-
-⬅️ [Central Hub](../README.md) | 🏛️ [Architecture](architecture.md) | 📡 [API](api_reference.md)
+Noxfort Monitor validates backend Go services, frontend UI scripts, and live MQTT/HTTP edge pipelines using unified `Makefile` targets and standard toolchains.
 
 ---
 
-## 1. Automated Test Suite
+## 1. Automated Test Suites
 
-Run the full automated test suite:
+Run the complete test suite (Go backend + Vitest frontend):
+
 ```bash
 make test
-# Equivalent to: go test ./... -v
 ```
 
-### In-Memory Mocks Architecture
-Core business logic in `internal/monitor` and `internal/security` decouples from disk databases using mock interfaces:
-* `MockDeviceRepository`: Simulates node lookup and `LastSeen` updates.
-* `MockTelemetryRepository`: Verifies incident persistence.
-* `MockAlertDispatcher`: Validates that alerts reach the routing policy.
-* `MockNotificationChannel`: Tests channel delivery without actual SMTP or Telegram network calls.
+* **Backend (Go)**: Runs `go test ./... -v` across security (`lockout_test.go`, PBKDF2 hashing, complexity), storage (`session_repo_test.go`, `retention_test.go`, transactional migration, backups/restore), HTTP RBAC/ingestion, MQTT strict policy, protocol decoding, and monitor alerts (`alerts_test.go`).
+* **Frontend (Vitest)**: Runs `npm test` (`make test-frontend`), executing the JavaScript unit test suite (4 test files, 26 tests) via Vitest (replaces legacy pytest tooling).
+* **Static Analysis**: Run `go vet ./...` or `make lint` to verify Go code hygiene.
 
 ---
 
-## 2. Manual E2E Ingestion Verification
+## 2. Live MQTT Testing (`mosquitto_pub`)
 
-### 2.1 MQTT Ingestion (`mosquitto_pub`)
+Because `MONITOR_MQTT_STRICT` defaults to `true`, pre-register `pump-01` as an `ACTIVE` device in `/devices` (or set `MONITOR_MQTT_STRICT=false` in local development) before publishing to the `noxfort/telemetry/#` hierarchy:
 
 ```bash
-# Heartbeat (Keep-Alive)
-mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
-  "category": "HARDWARE",
-  "origin": "pump-01",
-  "level": "INFO",
-  "message": "System OK",
-  "occurred_at": "2026-09-27T18:00:00Z"
-}'
-
-# Critical Alarm (Triggers Alert Dispatch)
-mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
-  "category": "HARDWARE",
-  "origin": "pump-01",
-  "level": "CRITICAL",
-  "message": "Hydraulic Overpressure Alarm: 180 bar",
-  "occurred_at": "2026-09-27T18:05:00Z"
-}'
+mosquitto_pub -h 127.0.0.1 -p 1883 \
+  -t "noxfort/telemetry/pump-01" \
+  -m '{"category":"HARDWARE","origin":"pump-01","level":"INFO","message":"System OK","occurred_at":"2026-09-27T18:00:00Z"}'
 ```
 
-### 2.2 HTTP REST Ingestion (`cURL`)
+---
+
+## 3. Live Zero-Trust HTTP Testing (`curl`)
+
+1. **Pre-register device (`POST /api/pair`)**:
 
 ```bash
-curl -X POST http://localhost:22100/api/telemetry \
+curl -i -X POST http://127.0.0.1:22100/api/pair \
   -H "Content-Type: application/json" \
-  -d '{
-    "category": "SOFTWARE",
-    "origin": "carina-core",
-    "level": "WARNING",
-    "message": "Model inference latency 4.2ms (exceeded 3.5ms target)",
-    "occurred_at": "2026-09-27T18:10:00Z"
-  }'
+  -d '{"origin":"pump-02","name":"Hydraulic Pump 02"}'
 ```
-*Expected response*: HTTP `200 OK` with body `{"status":"received"}`.
+
+Expected: `202 Accepted` without a key. Open `/devices` as `ADMIN`, approve `pump-02`, and copy its 5-minute TTL `nox_live_` token.
+
+2. **Ingest telemetry (`POST /api/telemetry`)**:
+
+```bash
+curl -i -X POST http://127.0.0.1:22100/api/telemetry \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_YOUR_COPIED_KEY" \
+  -H "X-Device-Origin: pump-02" \
+  -d '{"category":"HARDWARE","origin":"pump-02","level":"WARNING","message":"Temperature rising (temp 39.5C)","occurred_at":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}'
+```
+
+Expected: `202 Accepted`, followed by visible live state updates on `GET /api/dashboard/summary` and counter increments on `GET /metrics`.
 
 ---
 
-## 3. Observability & Channel Diagnostics
+## 4. Automated Presentation & Demo Mode
 
-### 3.1 Health Check & Metrics Validation
-```bash
-# Liveness probe (HTTP 200 "OK")
-curl -i http://localhost:22100/healthz
-
-# Deep component health diagnostics (JSON)
-curl -s http://localhost:22100/api/health | jq .
-
-# Prometheus metrics scrape
-curl -s http://localhost:22100/metrics
-```
-
-### 3.2 Notification Channel Diagnostics
-Verify configured notification channels on demand:
-```bash
-# Test Email (SMTP)
-curl -X POST http://localhost:22100/settings/test -H "Cookie: noxfort_session=<token>"
-
-# Test Telegram Bot
-curl -X POST http://localhost:22100/settings/test-telegram -H "Cookie: noxfort_session=<token>"
-```
+Run `make record-demo` (`scripts/demo/record_presentation.cjs` and `scripts/demo/mock_telemetry.cjs`) against `--demo` (`RunDesktopServer()`) to exercise UI workflows and simulated telemetry end-to-end.

@@ -21,12 +21,14 @@
 package http
 
 import (
+	"bytes"
 	"html/template"
 	"net/http"
 	"strings"
 	"sync"
 
 	"noxfort-monitor-server/internal/appdir"
+	"noxfort-monitor-server/internal/domain"
 )
 
 // TemplateCache caches parsed HTML templates to eliminate per-request disk reads and parsing overhead.
@@ -94,6 +96,67 @@ func RenderTemplate(w http.ResponseWriter, data interface{}, files ...string) er
 // RenderPage renders a standard application page wrapped in web/templates/layout.html.
 func RenderPage(w http.ResponseWriter, pageFile string, data interface{}) error {
 	return RenderTemplate(w, data, "web/templates/layout.html", pageFile)
+}
+
+// injectSessionViewData populates template session flags (CurrentUser, Role, IsAdmin, IsOperator)
+// from the request context when available, defaulting IsAdmin to false.
+func injectSessionViewData(r *http.Request, data interface{}) {
+	m, ok := data.(map[string]interface{})
+	if !ok || m == nil {
+		return
+	}
+
+	username, role, hasSession := SessionFromContext(r)
+	if hasSession {
+		if _, exists := m["CurrentUser"]; !exists {
+			m["CurrentUser"] = username
+		}
+		if _, exists := m["Role"]; !exists {
+			m["Role"] = role
+		}
+		if _, exists := m["IsAdmin"]; !exists {
+			m["IsAdmin"] = (role == domain.RoleAdmin)
+		}
+		if _, exists := m["IsOperator"]; !exists {
+			m["IsOperator"] = (role == domain.RoleOperator)
+		}
+		return
+	}
+
+	if _, exists := m["IsAdmin"]; !exists {
+		m["IsAdmin"] = false
+	}
+}
+
+// RenderTemplateWithRequest populates session metadata and executes the specified templates.
+func RenderTemplateWithRequest(w http.ResponseWriter, r *http.Request, data interface{}, files ...string) error {
+	injectSessionViewData(r, data)
+	return RenderTemplate(w, data, files...)
+}
+
+// RenderPageWithRequest populates session metadata and renders a standard application page wrapped in layout.html.
+func RenderPageWithRequest(w http.ResponseWriter, r *http.Request, pageFile string, data interface{}) error {
+	injectSessionViewData(r, data)
+	return RenderPage(w, pageFile, data)
+}
+
+// RenderPageToBufferWithRequest injects session metadata and renders a layout-wrapped page into memory.
+func RenderPageToBufferWithRequest(r *http.Request, pageFile string, data map[string]interface{}) ([]byte, error) {
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+	injectSessionViewData(r, data)
+
+	tmpl, err := GetTemplate("web/templates/layout.html", pageFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // GetTemplate is a package-level helper that retrieves a parsed template from the default cache.

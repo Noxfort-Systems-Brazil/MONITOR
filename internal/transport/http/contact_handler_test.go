@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"noxfort-monitor-server/internal/domain"
+	"noxfort-monitor-server/internal/security"
 )
 
 type mockContactRepo struct {
@@ -148,5 +149,58 @@ func TestContactHandler_CreateUpdateDelete(t *testing.T) {
 
 	if len(repo.contacts) != 0 {
 		t.Fatalf("Expected 0 contacts after delete, got %d", len(repo.contacts))
+	}
+}
+
+func TestContactHandler_ServePage_RBACControls(t *testing.T) {
+	repo := &mockContactRepo{
+		contacts: []domain.Contact{
+			{ID: 1, Name: "Alice Operator", Role: "Technician", Email: "alice@noxfort.com", Enabled: true},
+		},
+	}
+	userRepo := &mockUserRepoForHandler{users: make(map[string]*domain.User)}
+	secManager := security.NewSecurityManager(userRepo)
+	_ = secManager.EnsureSuperuser()
+	_, _ = secManager.RegisterWithRole("op_contacts", "Operator#Pass2026", domain.RoleOperator)
+
+	authHandler := NewAuthHandler(secManager)
+	mw := NewAuthMiddleware(authHandler)
+	handler := mw.Wrap(http.HandlerFunc(NewContactHandler(repo).ServePage))
+
+	// 1. Admin sees create, edit modal, and delete forms
+	adminToken := secManager.CreateSession(security.SuperuserUsername, domain.RoleAdmin)
+	reqAdmin := httptest.NewRequest(http.MethodGet, "/contacts", nil)
+	reqAdmin.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminToken})
+	recAdmin := httptest.NewRecorder()
+	handler.ServeHTTP(recAdmin, reqAdmin)
+
+	if recAdmin.Code != http.StatusOK {
+		t.Fatalf("Expected 200 for admin /contacts, got %d", recAdmin.Code)
+	}
+	adminBody := recAdmin.Body.String()
+	for _, action := range []string{`action="/contacts/create"`, `action="/contacts/update"`, `action="/contacts/delete"`} {
+		if !strings.Contains(adminBody, action) {
+			t.Errorf("Expected admin /contacts page to contain %s", action)
+		}
+	}
+
+	// 2. Operator sees directory in read-only mode without create, update, or delete controls
+	opToken := secManager.CreateSession("op_contacts", domain.RoleOperator)
+	reqOp := httptest.NewRequest(http.MethodGet, "/contacts", nil)
+	reqOp.AddCookie(&http.Cookie{Name: sessionCookieName, Value: opToken})
+	recOp := httptest.NewRecorder()
+	handler.ServeHTTP(recOp, reqOp)
+
+	if recOp.Code != http.StatusOK {
+		t.Fatalf("Expected 200 for operator /contacts, got %d", recOp.Code)
+	}
+	opBody := recOp.Body.String()
+	for _, action := range []string{`action="/contacts/create"`, `action="/contacts/update"`, `action="/contacts/delete"`} {
+		if strings.Contains(opBody, action) {
+			t.Errorf("Operator /contacts page must NOT contain %s", action)
+		}
+	}
+	if !strings.Contains(opBody, "Alice Operator") || !strings.Contains(opBody, "rbac_operator_readonly_notice") {
+		t.Errorf("Expected read-only contact directory and operator notice")
 	}
 }

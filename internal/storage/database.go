@@ -50,6 +50,19 @@ func NewDatabase(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
+	// Enable WAL journaling and busy timeout for durable 24/7 disk operations
+	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+			log.Printf("[STORAGE] Warning enabling WAL mode: %v", err)
+		}
+		if _, err := db.Exec("PRAGMA synchronous = NORMAL;"); err != nil {
+			log.Printf("[STORAGE] Warning setting synchronous mode: %v", err)
+		}
+		if _, err := db.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+			log.Printf("[STORAGE] Warning setting busy_timeout: %v", err)
+		}
+	}
+
 	// Initialize Tables (Schema Migration)
 	if err := initSchema(db); err != nil {
 		db.Close()
@@ -285,6 +298,40 @@ func initSchema(db *sql.DB) error {
 	);`
 	if _, err := db.Exec(queryTransitions); err != nil {
 		return fmt.Errorf("error creating device_state_transitions table: %w", err)
+	}
+
+	// 9. Persistent Web/Desktop Sessions Table
+	querySessions := `
+	CREATE TABLE IF NOT EXISTS sessions (
+		token_hash TEXT PRIMARY KEY,
+		username TEXT NOT NULL,
+		role TEXT NOT NULL,
+		expires_at DATETIME NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err := db.Exec(querySessions); err != nil {
+		return fmt.Errorf("error creating sessions table: %w", err)
+	}
+
+	// 10. Performance Indexes (parity with postgres_schema.go)
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_telemetry_occurred ON telemetry (occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_telemetry_device_id ON telemetry (device_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_telemetry_category ON telemetry (category);`,
+		`CREATE INDEX IF NOT EXISTS idx_telemetry_device_occurred ON telemetry (device_id, occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_telemetry_level_occurred ON telemetry (level, occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_sec_audit_created ON security_audit_logs (created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_sec_audit_user ON security_audit_logs (username);`,
+		`CREATE INDEX IF NOT EXISTS idx_alert_dispatch_time ON alert_dispatch_logs (dispatched_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_alert_dispatch_telemetry ON alert_dispatch_logs (telemetry_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_device_trans_time ON device_state_transitions (device_identifier, transition_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions (username);`,
+	}
+	for _, idx := range indexes {
+		if _, err := db.Exec(idx); err != nil {
+			return fmt.Errorf("error creating index (%s): %w", idx, err)
+		}
 	}
 
 	log.Println("[STORAGE] Database schema initialized successfully.")

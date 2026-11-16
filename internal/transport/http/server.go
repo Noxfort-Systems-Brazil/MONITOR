@@ -99,20 +99,28 @@ func NewServer(
 
 	healthH := NewHealthHandler(dbService, nil, dRepo)
 	metricsH := NewMetricsHandler(dbService, nil, dRepo)
+	devH := NewDeviceHandler(dRepo, tm)
+	devH.SetAuditRepository(auditRepo)
+	contactH := NewContactHandler(cRepo)
+	contactH.SetAuditRepository(auditRepo)
+	settingsH := NewSettingsHandler(sRepo, tester)
+	settingsH.SetAuditRepository(auditRepo)
+	tunnelH := NewTunnelHandler(sRepo, tm)
+	tunnelH.SetAuditRepository(auditRepo)
 
 	return &Server{
 		addr:             addr,
 		dashboardHandler: NewDashboardHandler(dRepo, tRepo),
-		deviceHandler:    NewDeviceHandler(dRepo, tm),
-		contactHandler:   NewContactHandler(cRepo),
-		settingsHandler:  NewSettingsHandler(sRepo, tester),
+		deviceHandler:    devH,
+		contactHandler:   contactH,
+		settingsHandler:  settingsH,
 		databaseHandler:  dbH,
 		auditHandler:     auditH,
 		authHandler:      authHandler,
 		userHandler:      userHandler,
 		telemetryHandler: NewTelemetryHandler(sm, dRepo),
 		browserHandler:   NewBrowserHandler(),
-		tunnelHandler:    NewTunnelHandler(sRepo, tm),
+		tunnelHandler:    tunnelH,
 		healthHandler:    healthH,
 		metricsHandler:   metricsH,
 		authMiddleware:   NewAuthMiddleware(authHandler),
@@ -133,6 +141,13 @@ func (s *Server) SetMQTTStatus(mqttStatus MQTTStatusProvider) {
 func (s *Server) SetBackupService(bs BackupService) {
 	if s.databaseHandler != nil {
 		s.databaseHandler.SetBackupService(bs)
+	}
+}
+
+// SetOnMQTTConfigChanged wires a callback so saving MQTT broker settings reconnects dynamically.
+func (s *Server) SetOnMQTTConfigChanged(cb func(string)) {
+	if s.settingsHandler != nil {
+		s.settingsHandler.SetOnMQTTConfigChanged(cb)
 	}
 }
 
@@ -230,16 +245,20 @@ func (s *Server) ExternalIngestionHandler() http.Handler {
 	return mux
 }
 
+func (s *Server) newHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              s.addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+}
+
 // Run configures the external telemetry ingestion listener and starts the listening loop.
 func (s *Server) Run() error {
-	handler := s.ExternalIngestionHandler()
-
-	s.httpServer = &http.Server{
-		Addr:         s.addr,
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-	}
+	s.httpServer = s.newHTTPServer(s.ExternalIngestionHandler())
 
 	log.Printf("🌍 External Telemetry Listener running on %s (Ingestion only: POST /api/telemetry)", s.addr)
 	return s.httpServer.ListenAndServe()
@@ -247,14 +266,7 @@ func (s *Server) Run() error {
 
 // RunDesktopServer runs the full desktop UI server on the configured address (used for automated recording and demonstrations).
 func (s *Server) RunDesktopServer() error {
-	handler := s.DesktopHandler()
-
-	s.httpServer = &http.Server{
-		Addr:         s.addr,
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-	}
+	s.httpServer = s.newHTTPServer(s.DesktopHandler())
 
 	log.Printf("🌍 Desktop UI Server running on %s (Full UI Access Enabled)", s.addr)
 	return s.httpServer.ListenAndServe()

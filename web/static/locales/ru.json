@@ -278,5 +278,12 @@
   "settings_reconfigure_confirm": "Вы действительно хотите перенастроить систему оповещений?",
   "settings_email_sending": "Отправка...",
   "settings_email_test_success": "Тестовое письмо успешно отправлено!",
-  "settings_telegram_prompt_id": "Введите ваш Telegram Chat ID для получения тестового сообщения:\n(Напишите @userinfobot в Telegram, чтобы узнать свой ID)"
+  "settings_telegram_prompt_id": "Введите ваш Telegram Chat ID для получения тестового сообщения:\n(Напишите @userinfobot в Telegram, чтобы узнать свой ID)",
+  "rbac_badge_readonly": "Только чтение",
+  "rbac_operator_readonly_notice": "Режим только для чтения (Оператор): создавать, изменять или удалять ресурсы могут только учетные записи Администратора.",
+  "rbac_admin_only_section": "Настройка доступна только Администратору.",
+  "forbidden_title": "Ограниченный доступ (Только чтение)",
+  "forbidden_operator_hint": "Ваша учетная запись работает с профилем Оператора (только чтение). Создавать, изменять и удалять ресурсы Монитора могут только администраторы.",
+  "forbidden_btn_back": "Назад",
+  "forbidden_btn_dashboard": "На главную панель"
 }

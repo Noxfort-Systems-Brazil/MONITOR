@@ -1,36 +1,34 @@
 # 🔍 审计追踪与系统可观测性
 
-本文档详细规范 **Noxfort Monitor™ v2.0** 的审计与合规子系统，涵盖安全访问留痕、告警推送 SLA 追溯及设备故障停机时间统计。
+本文档规范 **Noxfort Monitor™ v2.0** 的审计与合规子系统，涵盖安全事件留痕、关联遥测的告警投递记录以及设备状态跳变统计，面向 `Operator+` 用户在 `/audit` 与 `/api/audit/*` 提供只读查询。
 
 ⬅️ [文档中心](../README.md) | 🏛️ [系统架构](architecture.md) | 🔐 [安全规范](security.md)
 
 ---
 
-## 1. 三重审计存储架构
-
-Noxfort Monitor 将审计记录清晰划分为三条不可篡改的持久化数据流：
+## 1. 三重审计流架构
 
 ```mermaid
 graph TD
-    subgraph "事件产生源"
+    subgraph "事件来源"
         Auth[SecurityManager / AuthMiddleware]
-        Alerts[AlertService / 报警调度]
-        Watchdog[Engine / 看门狗引擎]
+        Alerts[AlertService / 重试与停机排空]
+        Watchdog[StateManager / Engine]
     end
 
-    subgraph "审计逻辑层"
+    subgraph "审计记录层"
         SecLog[1. SecurityAuditLog]
         AlertLog[2. AlertDispatchLog]
         TransLog[3. DeviceStateTransition]
     end
 
-    subgraph "数据库持久化"
-        DB[(PostgreSQL / SQLite)]
+    subgraph "90 天数据保留 (RetentionManager)"
+        DB[(PostgreSQL / SQLite WAL)]
     end
 
-    Auth -->|登录 / 认证失败 / 配置修改| SecLog
-    Alerts -->|邮件 / Telegram / 送达 SLA| AlertLog
-    Watchdog -->|离线 / 恢复上线 / 停机耗时| TransLog
+    Auth -->|登录 / 429 锁定 / RBAC 变更| SecLog
+    Alerts -->|Email TLS 465 / Telegram / Webhook| AlertLog
+    Watchdog -->|离线 / 恢复 / 停机耗时| TransLog
 
     SecLog --> DB
     AlertLog --> DB
@@ -39,30 +37,38 @@ graph TD
 
 ---
 
-## 2. 核心数据模型与字段规范
+## 2. 数据模型与精确字段 (`internal/domain/audit.go`)
 
-### 2.1 `SecurityAuditLog`（安全访问审计）
-记录所有身份鉴权尝试、凭据变更与管理操作：
-* `id` (*int64*): 自增唯一序列号。
-* `action` (*string*): 操作动作 (`LOGIN_SUCCESS`, `LOGIN_FAILED`, `CONFIG_UPDATE`, `USER_CREATE`)。
-* `username` (*string*): 发起操作的用户账号。
-* `ip_address` (*string*): 远程访问客户端 IP 地址。
-* `user_agent` (*string*): 客户端环境标识字符串。
-* `created_at` (*timestamp*): 记录创建的 UTC 时间戳。
+### 2.1 `SecurityAuditLog` (`security_audit_logs`)
+* `id` (*int64*): 自增主键。
+* `created_at` (*timestamp*): UTC 时间戳。
+* `username` (*string*): 操作发起者或目标用户名。
+* `action` (*string*): 规范动作标识（`AUTH_LOGIN_SUCCESS`、`AUTH_LOGIN_FAILED`、`AUTH_LOGIN_LOCKED`、`USER_CREATE`、`USER_PASSWORD_CHANGED`、`USER_ROLE_UPDATED`、`USER_UNLOCKED`、`USER_DELETE`、`DEVICE_*`、`CONTACT_*`、`SETTINGS_UPDATED`、`TUNNEL_*`、`DATABASE_*`、`POSTGRES_USER_PROVISIONED`）。
+* `details` (*string*): 上下文细节与执行结果。
+* `ip_address` (*string*): 经 `ExtractClientIP` 与 `TRUSTED_PROXIES` 解析后的真实客户端 IP。
 
-### 2.2 `AlertDispatchLog`（报警履约审计）
-为事故调查及服务等级协议 (SLA) 提供确凿的司法证据：
-* `incident_id` (*int64*): 关联的遥测告警事件引用。
-* `contact_id` (*int64*): 接收人联系方式编号。
-* `channel` (*string*): `EMAIL` 或 `TELEGRAM`。
-* `status` (*string*): `SENT` (已送达) 或 `FAILED` (发送失败)。
-* `error_message` (*string*): 网络异常时的详细错误日志。
-* `dispatched_at` (*timestamp*): 发送尝试的精确时间戳。
+### 2.2 `AlertDispatchLog` (`alert_dispatch_logs`)
+追踪 `AlertService` 的每次告警发送（含 `500ms`/`1500ms` 退避重试及 `Shutdown` 期间排空）：
+* `id` (*int64*): 主键。
+* `telemetry_id` (*int64*): 关联至通过 `SaveEventReturningID` 落库的 `telemetry.id`。
+* `channel` (*string*): `telegram`、`email` 或 `webhook`。
+* `recipient` (*string*): 目标接收者。
+* `role` (*string*): 目标通知角色。
+* `status` (*string*): 分发结果状态。
+* `error_reason` (*string*): 失败原因详述。
+* `dispatched_at` (*timestamp*): 投递时间。
 
-### 2.3 `DeviceStateTransition`（设备状态跳变日志）
-实时追踪现场硬件运行状态并计算累计中断时长：
-* `device_id` (*int64*): 受监控设备节点编号。
-* `from_state` (*string*): `ONLINE` / `OFFLINE`。
-* `to_state` (*string*): `OFFLINE` / `ONLINE`。
-* `transitioned_at` (*timestamp*): 状态转移被检测到的时刻。
-* `downtime_seconds` (*int64*): 设备重新上线时结算的累计故障停机秒数。
+### 2.3 `DeviceStateTransition` (`device_state_transitions`)
+记录每 `30s` 轮询检查（`5m` 离线阈值）捕获的设备状态变更：
+* `id` (*int64*): 主键。
+* `device_identifier` (*string*): 设备唯一标识符。
+* `previous_state` (*string*): 原状态。
+* `new_state` (*string*): 新状态。
+* `duration_offline_sec` (*int64*): 恢复上线时结算的离线持续秒数。
+* `transition_at` (*timestamp*): 状态跳变时刻。
+
+---
+
+## 3. 访问控制与保留生命周期
+* **只读查询**：`ADMIN` 与 `OPERATOR` 均可通过 `/audit` 及 `/api/audit/{security,alerts,transitions}` 查询审计流。
+* **自动清理**：`RetentionManager` 每 24 小时清除上述三张表与 `telemetry` 中超出 `MONITOR_RETENTION_DAYS`（默认 `90` 天）的过期数据。

@@ -67,12 +67,14 @@
                             <span data-i18n="sidebar_settings">Settings</span>
                         </a>
                     </li>
+                    {{ if .IsAdmin }}
                     <li class="nav-item">
                         <a class="nav-link" href="/users">
                             <i class="fa-solid fa-user-shield me-1"></i> 
                             <span data-i18n="sidebar_users">Users</span>
                         </a>
                     </li>
+                    {{ end }}
                     <li class="nav-item">
                         <a class="nav-link" href="/audit">
                             <i class="fa-solid fa-shield-halved me-1"></i> 
@@ -81,8 +83,26 @@
                     </li>
                 </ul>
 
-                <!-- Right: Utility Controls (Language & Logout) -->
+                <!-- Right: Utility Controls (Role Badge, Language & Logout) -->
                 <ul class="navbar-nav align-items-center gap-2">
+                    {{ if .CurrentUser }}
+                    <li class="nav-item d-none d-xl-flex align-items-center me-1">
+                        {{ if .IsAdmin }}
+                        <span class="badge bg-warning bg-opacity-15 text-warning border border-warning px-2 py-1" style="font-size: 0.75rem;">
+                            <i class="fa-solid fa-user-shield me-1"></i>{{ .CurrentUser }}
+                        </span>
+                        {{ else }}
+                        <span class="badge bg-info bg-opacity-15 text-info border border-info px-2 py-1" style="font-size: 0.75rem;">
+                            <i class="fa-solid fa-eye me-1"></i>{{ .CurrentUser }} · <span data-i18n="rbac_badge_readonly">Leitura</span>
+                        </span>
+                        {{ end }}
+                    </li>
+                    <li class="nav-item">
+                        <button type="button" class="btn btn-outline-secondary btn-sm px-2 py-1" data-bs-toggle="modal" data-bs-target="#modalSelfPassword" title="Alterar Minha Senha" style="font-size: 0.8rem;">
+                            <i class="fa-solid fa-key"></i>
+                        </button>
+                    </li>
+                    {{ end }}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" id="langDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <span id="current-lang-flag" class="fi fi-br me-2"></span> <span id="current-lang-label">PT</span>
@@ -123,6 +143,37 @@
             </div>
         </div>
     </footer>
+
+    {{ if .CurrentUser }}
+    <div class="modal fade" id="modalSelfPassword" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border-secondary shadow-lg">
+                <div class="modal-header border-secondary bg-black bg-opacity-25">
+                    <h5 class="modal-title"><i class="fa-solid fa-key text-warning me-2"></i> Alterar Minha Senha ({{ .CurrentUser }})</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div id="self-pass-alert" class="alert d-none small mb-3"></div>
+                    <form id="selfPasswordForm">
+                        <input type="hidden" id="self_pass_username" value="{{ .CurrentUser }}">
+                        <div class="mb-3">
+                            <label for="self_current_password" class="form-label small text-muted fw-bold">SENHA ATUAL</label>
+                            <input type="password" class="form-control bg-black text-white border-secondary" id="self_current_password" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="self_new_password" class="form-label small text-muted fw-bold">NOVA SENHA (8+ CARACTERES, MAIÚSCULA, NÚMERO E SÍMBOLO)</label>
+                            <input type="password" class="form-control bg-black text-white border-secondary" id="self_new_password" required minlength="8">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-secondary bg-black bg-opacity-25">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" id="btn-submit-self-pass" class="btn btn-warning text-dark fw-bold">Atualizar Senha</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{ end }}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/js/app.js"></script>

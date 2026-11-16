@@ -1,35 +1,37 @@
 # 🧪 测试规范与质量保证 (QA)
 
-本文档规范 **Noxfort Monitor™ v2.0** 的测试体系，涵盖基于内存 Mock 仓储的自动化单元测试、通过 MQTT 和 HTTP REST 进行的手动端到端 (E2E) 验证，以及系统可观测性与告警渠道诊断。
+本文档规范 **Noxfort Monitor™ v2.0** 的测试体系：自动化单元与集成测试（Go + Vitest）、MQTT (`noxfort/telemetry/#`) 与 Zero-Trust HTTP (`/api/pair` + `/api/telemetry`) 端到端测试以及演示模式录制验证。
 
-⬅️ [文档中心](README.md) | 🏛️ [系统架构](architecture.md) | 📡 [API 规范](api_reference.md)
+⬅️ [文档中心](../README.md) | 🏛️ [系统架构](architecture.md) | 📡 [API 规范](api_reference.md)
 
 ---
 
-## 1. 自动化单元测试套件
+## 1. 自动化测试套件
 
-运行完整测试套件：
 ```bash
+# 运行全部后端 Go 测试 (go test ./... -v) 与前端 Vitest 测试 (npm test)
 make test
-# 底层等效于: go test ./... -v
+
+# 仅运行前端测试 (Vitest: 4 个测试文件，26 个用例；替代原 pytest 流程)
+make test-frontend
+
+# 静态检查 (go vet)
+make lint
 ```
 
-### 内存 Mock 仓储架构
-`internal/monitor` 与 `internal/security` 中的核心业务逻辑通过 Mock 接口与物理磁盘彻底解耦：
-* `MockDeviceRepository`：模拟设备查询与 `LastSeen` 刷新。
-* `MockTelemetryRepository`：验证告警日志的持久化调用。
-* `MockAlertDispatcher`：断言事件是否正确送达路由分发策略。
-* `MockNotificationChannel`：测试报警渠道逻辑，无需发起真实的 SMTP 或 Telegram 网络请求。
+* **后端 Go 测试**：覆盖安全模块（`lockout_test.go`、PBKDF2 散列、复杂度）、存储模块（`session_repo_test.go`、`retention_test.go`、事务迁移、备份/恢复）、HTTP RBAC/摄取接口、严格 MQTT、协议解码以及告警（`alerts_test.go`）。
+* **内存 Mock 接口**：`MockDeviceRepository`、`MockTelemetryRepository`、`MockAlertDispatcher` 与 `MockNotificationChannel`。
 
 ---
 
-## 2. 手动端到端 (E2E) 遥测验证
+## 2. 手动端到端 (E2E) 验证
 
-### 2.1 MQTT 遥测上报测试 (`mosquitto_pub`)
+### 2.1 MQTT 遥测上报 (`mosquitto_pub`)
+由于 `MONITOR_MQTT_STRICT` 默认为 `true`，请先在 `/devices` 将 `pump-01` 注册为 `ACTIVE`（或开发环境下设置 `MONITOR_MQTT_STRICT=false`），再向 `noxfort/telemetry/#` 发布消息：
 
 ```bash
-# 设备保活心跳 (Keep-Alive)
-mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
+# 保活心跳
+mosquitto_pub -t "noxfort/telemetry/pump-01" -m '{
   "category": "HARDWARE",
   "origin": "pump-01",
   "level": "INFO",
@@ -37,8 +39,8 @@ mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
   "occurred_at": "2026-09-27T18:00:00Z"
 }'
 
-# 严重硬件故障告警 (触发即时推送)
-mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
+# 严重告警（通过 telemetry_id 关联至 alert_dispatch_logs）
+mosquitto_pub -t "noxfort/telemetry/pump-01" -m '{
   "category": "HARDWARE",
   "origin": "pump-01",
   "level": "CRITICAL",
@@ -47,43 +49,36 @@ mosquitto_pub -t "noxfort/devices/pump-01/telemetry" -m '{
 }'
 ```
 
-### 2.2 HTTP REST 遥测接入测试 (`cURL`)
+### 2.2 Zero-Trust HTTP REST 验证 (`cURL`)
 
 ```bash
-curl -X POST http://localhost:22100/api/telemetry \
+# 1. 提交设备预配对请求 (202 Accepted，不返回密钥)
+curl -i -X POST http://localhost:22100/api/pair \
   -H "Content-Type: application/json" \
+  -d '{"origin":"carina-core","name":"Carina Core"}'
+
+# 2. 在 /devices 审批后复制临时令牌 nox_live_ (TTL 5m)，再上报遥测：
+curl -i -X POST http://localhost:22100/api/telemetry \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_YOUR_COPIED_TOKEN" \
+  -H "X-Device-Origin: carina-core" \
   -d '{
     "category": "SOFTWARE",
     "origin": "carina-core",
     "level": "WARNING",
     "message": "模型推理耗时 4.2ms (预期上限 3.5ms)",
-    "occurred_at": "2026-09-27T18:10:00Z"
+    "occurred_at": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"
   }'
 ```
-*预期响应结果*：HTTP `200 OK`，返回 `{"status":"received"}`。
+*预期结果*：`202 Accepted`，同时 `GET /api/dashboard/summary` 与 `GET /metrics` 计数器实时刷新。
 
 ---
 
-## 3. 可观测性与告警渠道诊断
+## 3. 可观测性与演示模式
 
-### 3.1 健康探针与指标抓取验证
 ```bash
-# 存活探针 (HTTP 200 "OK")
 curl -i http://localhost:22100/healthz
-
-# 深度组件健康诊断 (JSON)
-curl -s http://localhost:22100/api/health | jq .
-
-# Prometheus 格式指标抓取
+curl -s http://localhost:22100/api/health
 curl -s http://localhost:22100/metrics
-```
-
-### 3.2 告警通道即时诊断测试
-按需主动验证通知渠道配置与联通性：
-```bash
-# 测试 SMTP 邮件渠道
-curl -X POST http://localhost:22100/settings/test -H "Cookie: noxfort_session=<token>"
-
-# 测试 Telegram 告警推送
-curl -X POST http://localhost:22100/settings/test-telegram -H "Cookie: noxfort_session=<token>"
+make record-demo    # 针对 --demo 模式执行 scripts/demo/ 演示流水线
 ```

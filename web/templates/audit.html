@@ -123,9 +123,9 @@
                                     <tr>
                                         <td class="font-monospace small text-muted">{{ .DispatchedAt.Format "2006-01-02 15:04:05" }}</td>
                                         <td>
-                                            {{ if eq .Channel "Email" }}
+                                            {{ if or (eq .Channel "email") (eq .Channel "Email") }}
                                             <span class="badge bg-secondary"><i class="fa-solid fa-envelope me-1 text-danger"></i>Email</span>
-                                            {{ else if eq .Channel "Telegram" }}
+                                            {{ else if or (eq .Channel "telegram") (eq .Channel "Telegram") }}
                                             <span class="badge bg-info text-dark"><i class="fa-brands fa-telegram me-1"></i>Telegram</span>
                                             {{ else }}
                                             <span class="badge bg-secondary">{{ .Channel }}</span>

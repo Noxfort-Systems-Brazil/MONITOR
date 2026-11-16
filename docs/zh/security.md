@@ -1,102 +1,65 @@
-# 🔐 系统安全、身份认证与基于角色的访问控制 (RBAC)
+# 🔐 系统安全、身份认证与访问控制 (RBAC)
 
-本文档深入阐述 **Noxfort Monitor™ v2.0** 的安全体系结构，包括用户身份校验、会话令牌生命周期、工业级密码复杂度策略、加盐密码散列及基于角色的访问控制 (RBAC)。
+本文档规范 **Noxfort Monitor™ v2.0** 的纵深防御体系：严格 RBAC、PBKDF2 密码派生、防暴力破解锁定、数据库哈希会话、可信代理校验、Zero-Trust 设备接入以及消息传输安全加固。
 
 ⬅️ [文档中心](../README.md) | 🏛️ [系统架构](architecture.md) | 🔍 [审计追踪](audit_trail.md) | 📡 [API 规范](api_reference.md)
 
 ---
 
-## 1. 角色定义与权限隔离 (RBAC)
+## 1. 基于角色的访问控制 (RBAC)
 
-Noxfort Monitor 实行严格的最小权限分级制度：
-
-* **`RoleAdmin` ("ADMIN")**：系统超级管理员。拥有用户增删改查、数据库迁移热切、反向穿透隧道控制及全局设置权限。
-* **`RoleOperator` ("OPERATOR")**：运维操作人员。拥有监控大盘查看、设备在线状态监控及告警历史调阅权限。
-* **报警通知分发角色**：
-  * **`TECHNICIAN`**：仅接收 `HARDWARE` 硬件故障报警。
-  * **`PROGRAMMER`**：仅接收 `SOFTWARE` 软件故障报警。
-  * **`ADMIN`**：接收全量系统报警。
+* **`ADMIN`**：拥有全部管理权限（设备配对/密钥轮换、用户/角色/解锁管理、告警联系人、系统/MQTT 参数、远程隧道及数据库切换/备份/恢复）。系统内禁止删除超级管理员与最后一名管理员（`DeleteUserByActor`）。
+* **`OPERATOR`（严格只读）**：仅允许只读页面访问（`GET` 仪表盘、`/audit`、`/api/audit/*`、`/remote`、`/server`、`/settings`）、`/api/auth/logout` 以及自助修改本人密码（`POST /api/users/password`，需提供 `current_password`）。严禁访问 `/users`、用户修改接口、`/api/settings/database/backup*` 及所有变更操作：
+  * API / XHR 请求（`/api/*`、`Accept: application/json`、`XMLHttpRequest`）返回 JSON **`403 Forbidden`**。
+  * 桌面与浏览器页面请求渲染专用 [`web/templates/forbidden.html`](../../web/templates/forbidden.html) 权限拒绝页。
 
 ---
 
-## 2. 密码安全策略与加密存储
+## 2. 密码派生与复杂度策略
 
-### 2.1 独立加盐密码散列
-所有用户凭据均在 [`internal/security/hasher.go`](../../internal/security/hasher.go) 中通过带有独占随机盐的 SHA-256 算法进行保护：
-* 为每个用户独立生成 16 字节的安全随机盐 (`crypto/rand`)。
-* 密码明文与散列值均被彻底排除在 JSON 序列化字段之外 (`json:"-"`)。
-* 采用恒定时间比对算法抵御时序侧信道攻击 (Timing Attacks)。
-
-### 2.2 工业级密码复杂度策略 (`password_validator.go`)
-为保护工控关键资产抵御字典暴破攻击，[`internal/security/password_validator.go`](../../internal/security/password_validator.go) 通过 `ValidatePasswordComplexity()` 强制执行严格校验：
-* **最小长度**：不得少于 8 个字符。
-* **数字要求**：至少包含一个数字 (`0-9`)。
-* **大写字母**：至少包含一个大写字母 (`A-Z`)。
-* **小写字母**：至少包含一个小写字母 (`a-z`)。
-* **特殊字符**：至少包含一个符号 (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\§¬¢£`)。
-
-任何注册或创建用户请求若不符合上述规则，将直接返回 HTTP `400 Bad Request`。
-
-### 2.3 交互式密码强度指示器 (`password_meter.js`)
-所有用户管理操作界面均集成了前端实时校验与反馈机制 ([`web/static/js/password_meter.js`](../../web/static/js/password_meter.js))：
-* 随着用户键入动态计算强度评分（0 至 4 级）。
-* 提供交互式校验检查清单，实时直观提示各项规则满足情况。
-* 在所有复杂度条件全部达成前严格禁用表单提交。
+* **PBKDF2 HMAC-SHA256**：[`PBKDF2Hasher`](../../internal/security/hasher.go) 使用 **PBKDF2 HMAC-SHA256**，固定 **`100,000` 次迭代**、**`16` 字节随机盐值**（`crypto/rand`）及 **`32` 字节派生密钥**。
+* **复杂度校验 (`ValidatePasswordComplexity`)**：强制至少 8 位并包含大小写字母、数字与特殊符号，前端配合 [`web/static/js/password_meter.js`](../../web/static/js/password_meter.js) 实时评分提示。
 
 ---
 
-## 3. 会话机制与 AuthMiddleware 中间件
+## 3. 防暴力破解锁定 (`LoginAttemptTracker`)
+
+* 针对 `POST /api/auth/login` 按复合键 `username|ip`（通过 `ExtractClientIP` 解析真实客户端 IP）追踪认证失败次数。
+* **锁定策略**：在 **`15` 分钟**滑动窗口内累计 **`5` 次失败**将触发 **`5` 分钟锁定**，返回 HTTP **`429 Too Many Requests`** 并记录 `AUTH_LOGIN_LOCKED`。
+* 管理员可通过 `POST /api/users/unlock` 手动解除锁定。
+
+---
+
+## 4. 持久化哈希会话与可信代理校验
 
 ```mermaid
 sequenceDiagram
-    participant User as 运维人员 / 浏览器
-    participant MW as AuthMiddleware 中间件
-    participant SM as SessionManager 会话管理器
-    participant App as 保护的业务处理器
+    participant User as 操作员 / 浏览器
+    participant MW as AuthMiddleware
+    participant SM as DBSessionStore (SQLite / PG)
+    participant App as 受保护处理器
 
-    User->>MW: HTTP 请求 (带 Cookie: noxfort_session=XYZ)
-    MW->>SM: ValidateSession("XYZ")
-    alt 会话有效
-        SM-->>MW: Session(User, RoleAdmin)
-        MW->>App: 传递带有用户上下文的请求
-        App-->>User: 200 OK (渲染大盘视图)
-    else 会话失效或过期
-        MW-->>User: 303 重定向到 /login (API 路由返回 401 Unauthorized)
+    User->>MW: HTTP 请求 (Cookie: noxfort_session=XYZ)
+    MW->>SM: ValidateSession(SHA256("XYZ"))
+    alt 会话有效 (< 24h)
+        SM-->>MW: Session(User, Role)
+        MW->>App: 执行请求（附带 RBAC 检查）
+        App-->>User: 200 OK（或 OPERATOR 变更返回 403）
+    else 会话失效或携带 ?token= 查询参数
+        MW-->>User: 303 重定向至 /login（API 返回 401 Unauthorized）
     end
 ```
 
-* **内存线程安全存储**：基于带读写互斥锁的哈希表管理。
-* **滑动窗口续期**：活动用户请求会自动将 24 小时过期窗口后移。
-* **区分式拦截响应**：未鉴权的 Web 页面请求以 HTTP `303 See Other` 重定向至登录页；REST API 调用则返回 `401 Unauthorized`。
+* **`DBSessionStore`**：会话持久化存储于 `sessions` 表，仅保存令牌的 **`SHA-256` 哈希（`token_hash`）**，固定 **TTL `24` 小时** 并每小时自动清理过期会话。因实现 `ReloadableRepository`，会话在 SQLite $\leftrightarrow$ PostgreSQL 热切换期间保持连续有效。
+* **禁用 URL `?token=`**：`ExtractSessionToken` 仅从 HTTP-only Cookie 提取令牌，显式拒绝 `?token=` 查询参数以防日志或 Referer 泄露。
+* **`TRUSTED_PROXIES` 与 `MONITOR_USE_HTTPS`**：`ExtractClientIP` 和 `IsHTTPSRequest` 仅采信来自 `TRUSTED_PROXIES` 网段的 `X-Real-IP`、`X-Forwarded-For` 与 `X-Forwarded-Proto` 请求头（例如 [`caddy/Caddyfile`](../../caddy/Caddyfile)），保障审计 IP 真实性与 `Secure` Cookie 属性。
 
 ---
 
-## 4. MQTT Broker 安全加固与 PBKDF2 认证
+## 5. 边缘接入防护、HTML 脱敏与传输加固
 
-* **禁用匿名访问**：[`mosquitto.conf`](../../mosquitto/config/mosquitto.conf) 强制配置 `allow_anonymous false`。
-* **强哈希保护**：密码存储在 `mosquitto/config/passwd`，采用 PBKDF2 (SHA-512) 算法散列。
-* **自动化脚本**：命令 `make broker-auth` 自动生成凭证并同步写入 `.env`。
-* **版本控制防护**：密码文件 (`passwd*`) 严格从 Git 追踪中排除。
-
----
-
-## 5. 运行环境安全审计 (`env_validator.go`)
-
-应用启动时自动对环境配置文件执行严格安全合规检查：
-* **文件权限限制 (`0600`)**：在 Linux 下限制 `.env` 文件仅允许所有者读写。
-* **默认凭据预警**：检测到生产环境中仍然保留默认密码 (`admin` / `Admin@Noxfort2026!`) 时输出高危警告。
-* **MQTT 凭据检查**：检查连接前是否正确配置 `MQTT_USER` 与 `MQTT_PASSWORD`。
-
----
-
-## 6. 幂等超级管理员初始化 (`superuser.go`)
-
-系统启动时根据环境变量 `MONITOR_ADMIN_USER` 和 `MONITOR_ADMIN_PASSWORD` 执行初始化：
-* 若数据库中尚无管理员账号，则自动创建首个超级管理员。
-* 在生产环境中配置自定义管理员凭据时，系统会自动清理默认测试账号，防止留下安全后门。
-
----
-
-## 7. CI/CD 自动化机密防泄漏机制
-
-持续集成流水线 ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)) 严密监控每一次代码提交，阻断任何 `.env` 文件、私钥 (`*.pem`, `*.key`) 及 Mosquitto 密码库被提交至 Git。
+* **Zero-Trust 设备配对**：`POST /api/pair` 将设备置于 `PENDING` 队列（上限 50；若已 `ACTIVE` 返回 `409 Conflict`）并返回 `202`（不返回密钥）；`POST /api/telemetry` 通过常量时间比较校验 `X-Device-Token`/`Bearer`，同时校验 `X-Device-Origin` 与 `±300s` 时间戳窗口。
+* **严格 MQTT 策略**：`MONITOR_MQTT_STRICT` 默认为 `true`，拒绝 `noxfort/telemetry/#` 上来自未注册或暂停（`PAUSED`）设备的消息。
+* **HTML 凭据脱敏**：`/settings`、`/remote` 与 `/devices` 在渲染页面时遮罩 `ApiKey` 与 `duckdns_token`，局部保存时自动保留库内现有密钥。
+* **SMTP 通道加固**：`EmailChannel` 支持 465 端口隐式 TLS（最低 `TLS 1.2`）并使用 `sanitizeEmailHeader` 剥离 CRLF，防范邮件头注入。
+* **Mosquitto、`env_validator.go`、`superuser.go` 与 CI**：执行 `./scripts/setup_mqtt_auth.sh` 启用 PBKDF2 认证、检查 `.env` `0600` 权限、幂等初始化超级管理员并通过 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 防范机密泄露。

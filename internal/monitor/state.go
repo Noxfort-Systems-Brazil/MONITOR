@@ -38,6 +38,11 @@ type DeviceHeartbeatUpdater interface {
 	UpdateLastSeen(identifier string, lastSeen time.Time) error
 }
 
+// DeviceAccessInspector optionally checks whether a registered device is currently enabled.
+type DeviceAccessInspector interface {
+	GetByIdentifier(identifier string) (*domain.Device, error)
+}
+
 // HeartbeatDetector determines whether an incoming event is a routine keep-alive or an incident.
 type HeartbeatDetector interface {
 	IsHeartbeat(event *domain.IncomingEvent) bool
@@ -112,6 +117,14 @@ func (sm *StateManager) ProcessEvent(identifier string, event *domain.IncomingEv
 		return
 	}
 
+	// 0. Maintenance guard: if device exists and is explicitly paused by admin, suppress updates and alerts.
+	if inspector, ok := sm.devices.(DeviceAccessInspector); ok && inspector != nil {
+		if dev, err := inspector.GetByIdentifier(identifier); err == nil && dev != nil && !dev.Enabled {
+			log.Printf("[STATE] Device '%s' is paused (Maintenance Mode). Event suppressed.", identifier)
+			return
+		}
+	}
+
 	// 1. Heartbeat: Always update the system's last seen status.
 	if sm.devices != nil {
 		if err := sm.devices.UpdateLastSeen(identifier, event.OccurredAt); err != nil {
@@ -127,15 +140,30 @@ func (sm *StateManager) ProcessEvent(identifier string, event *domain.IncomingEv
 	// 3. Incident Processing
 	log.Printf("🚨 [INCIDENT] System: %s | Level: %s | Msg: %s", identifier, event.Level, event.Message)
 
-	// A. Persist the Incident for Audit
+	// A. Persist the Incident for Audit (capturing telemetry ID when supported for alert audit linkage)
+	var telIDPtr *int64
 	if sm.events != nil {
-		if err := sm.events.SaveEvent(identifier, event); err != nil {
+		if idRec, ok := sm.events.(interface {
+			SaveEventReturningID(string, *domain.IncomingEvent) (int64, error)
+		}); ok {
+			if telID, err := idRec.SaveEventReturningID(identifier, event); err != nil {
+				log.Printf("[STATE] CRITICAL: Failed to save incident to DB: %v", err)
+			} else if telID > 0 {
+				telIDPtr = &telID
+			}
+		} else if err := sm.events.SaveEvent(identifier, event); err != nil {
 			log.Printf("[STATE] CRITICAL: Failed to save incident to DB: %v", err)
 		}
 	}
 
 	// B. Trigger Alert Dispatch
 	if sm.alerts != nil {
-		sm.alerts.TriggerAlert(identifier, event)
+		if withID, ok := sm.alerts.(interface {
+			TriggerAlertWithTelemetryID(string, *domain.IncomingEvent, *int64)
+		}); ok {
+			withID.TriggerAlertWithTelemetryID(identifier, event, telIDPtr)
+		} else {
+			sm.alerts.TriggerAlert(identifier, event)
+		}
 	}
 }

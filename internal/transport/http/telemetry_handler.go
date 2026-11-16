@@ -22,8 +22,10 @@ package http
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -32,6 +34,7 @@ import (
 	"time"
 
 	"noxfort-monitor-server/internal/domain"
+	"noxfort-monitor-server/internal/metrics"
 	"noxfort-monitor-server/internal/monitor"
 )
 
@@ -101,12 +104,11 @@ func (h *TelemetryHandler) HandlePair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Generate cryptographically secure API Key (32 random bytes = 64 hex chars)
-	rawBytes := make([]byte, 32)
-	if _, err := rand.Read(rawBytes); err != nil {
+	apiKey, err := generateDeviceAPIKey()
+	if err != nil {
 		http.Error(w, "Internal error generating security token", http.StatusInternalServerError)
 		return
 	}
-	apiKey := "nox_live_" + hex.EncodeToString(rawBytes)
 	expiresAt := time.Now().Add(5 * time.Minute)
 
 	// 3. Save as PENDING in the active database
@@ -121,6 +123,10 @@ func (h *TelemetryHandler) HandlePair(w http.ResponseWriter, r *http.Request) {
 
 	if h.deviceRepo != nil {
 		if err := h.deviceRepo.CreateOrUpdatePending(device); err != nil {
+			if errors.Is(err, domain.ErrDeviceAlreadyActive) {
+				http.Error(w, "Conflict: Device is already ACTIVE. Rotate API key via Monitor UI.", http.StatusConflict)
+				return
+			}
 			log.Printf("[SECURITY] Error saving pending device %s: %v", req.Origin, err)
 			http.Error(w, "Failed to persist pairing session", http.StatusInternalServerError)
 			return
@@ -211,6 +217,7 @@ func (h *TelemetryHandler) HandleIngest(w http.ResponseWriter, r *http.Request) 
 		}
 
 		if device == nil {
+			metrics.IncTelemetryRejected("http", "unregistered")
 			http.Error(w, "Device not recognized. Please pair first via POST /api/pair", http.StatusForbidden)
 			return
 		}
@@ -218,36 +225,41 @@ func (h *TelemetryHandler) HandleIngest(w http.ResponseWriter, r *http.Request) 
 		// Cenário A: Dispositivo ainda está em estado PENDING (Primeiro Envio com a Chave)
 		if device.Status == "PENDING" {
 			if token == "" {
+				metrics.IncTelemetryRejected("http", "missing_token")
 				http.Error(w, "Unauthorized: Device is pending pairing. Missing X-Device-Token", http.StatusUnauthorized)
 				return
 			}
 
 			activated, err := h.deviceRepo.ActivateDevice(event.Origin, token)
 			if err != nil {
+				metrics.IncTelemetryRejected("http", "pairing_expired")
 				http.Error(w, fmt.Sprintf("Forbidden: %v", err), http.StatusForbidden)
 				return
 			}
 			if !activated {
+				metrics.IncTelemetryRejected("http", "invalid_token")
 				http.Error(w, "Unauthorized: Invalid pairing API key", http.StatusUnauthorized)
 				return
 			}
 
 			log.Printf("[SECURITY] ✅ Device '%s' successfully paired and activated on first ingestion!", event.Origin)
 		} else if device.Status == "ACTIVE" {
-			// Cenário B: Dispositivo já é ACTIVE
-			if device.ApiKey != "" {
-				if token == "" || token != device.ApiKey {
-					http.Error(w, "Unauthorized: Invalid or missing X-Device-Token", http.StatusUnauthorized)
-					return
-				}
+			// Cenário B: Dispositivo já é ACTIVE — exigir sempre ApiKey válida em tempo constante
+			if !device.Enabled {
+				metrics.IncTelemetryRejected("http", "paused")
+				http.Error(w, "Device disabled by administrator (Maintenance Mode)", http.StatusForbidden)
+				return
 			}
 
-			if !device.Enabled {
-				http.Error(w, "Device disabled by administrator (Maintenance Mode)", http.StatusForbidden)
+			if device.ApiKey == "" || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(device.ApiKey)) != 1 {
+				metrics.IncTelemetryRejected("http", "invalid_token")
+				http.Error(w, "Unauthorized: Invalid or missing X-Device-Token", http.StatusUnauthorized)
 				return
 			}
 		}
 	}
+
+	metrics.IncTelemetryIngested("http", string(event.Level))
 
 	// 8. Encaminhar para o EventProcessor
 	if h.processor != nil {
@@ -256,5 +268,13 @@ func (h *TelemetryHandler) HandleIngest(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "received"})
+}
+
+func generateDeviceAPIKey() (string, error) {
+	rawBytes := make([]byte, 32)
+	if _, err := rand.Read(rawBytes); err != nil {
+		return "", err
+	}
+	return "nox_live_" + hex.EncodeToString(rawBytes), nil
 }
 

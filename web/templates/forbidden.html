@@ -1,0 +1,36 @@
+{{ define "content" }}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-6">
+        <div class="card bg-dark border-warning text-light shadow-lg" style="border-left: 5px solid #ffc107 !important;">
+            <div class="card-header bg-black bg-opacity-50 border-secondary d-flex align-items-center py-3">
+                <i class="fa-solid fa-shield-halved text-warning fs-4 me-3"></i>
+                <div>
+                    <h4 class="mb-0 text-warning fw-bold" data-i18n="forbidden_title">Acesso Restrito (Somente Leitura)</h4>
+                    <small class="text-muted">HTTP 403 · Permissões Insuficientes</small>
+                </div>
+            </div>
+            <div class="card-body p-4">
+                <div class="alert alert-warning bg-warning bg-opacity-10 border-warning text-light mb-3" role="alert">
+                    <i class="fa-solid fa-triangle-exclamation text-warning me-2"></i>
+                    <span id="forbidden-server-message">{{ .Message }}</span>
+                </div>
+                <p class="text-muted small mb-4" data-i18n="forbidden_operator_hint">
+                    Sua conta está operando no perfil de Operador (somente leitura). Apenas contas com nível Administrador podem cadastrar, editar ou excluir recursos do Monitor.
+                </p>
+                <div class="d-flex flex-wrap gap-2">
+                    {{ if and .BackURL (ne .BackURL "/") }}
+                    <a href="{{ .BackURL }}" class="btn btn-info text-dark fw-bold">
+                        <i class="fa-solid fa-arrow-left me-2"></i>
+                        <span data-i18n="forbidden_btn_back">Voltar</span>
+                    </a>
+                    {{ end }}
+                    <a href="/" class="btn {{ if and .BackURL (ne .BackURL "/") }}btn-outline-light{{ else }}btn-info text-dark fw-bold{{ end }}">
+                        <i class="fa-solid fa-chart-line me-2"></i>
+                        <span data-i18n="forbidden_btn_dashboard">Voltar ao Painel</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{ end }}

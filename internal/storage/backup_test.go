@@ -107,4 +107,20 @@ func TestBackupManager_SQLiteBackupAndRotation(t *testing.T) {
 	if _, err := os.Stat(backup1.FilePath); !os.IsNotExist(err) {
 		t.Errorf("Expected oldest backup '%s' to be deleted by rotation", backup1.FilePath)
 	}
+
+	// 5. Verify ResolveBackupPath blocks path traversal and RestoreBackup restores deleted state
+	if _, err := bm.ResolveBackupPath("../secret.db"); err == nil {
+		t.Fatal("SECURITY VIOLATION: ResolveBackupPath accepted path traversal")
+	}
+	latestName := list[0].Filename
+	if _, err := dbm.GetDB().Exec("DELETE FROM test_data;"); err != nil {
+		t.Fatalf("Failed deleting rows before restore test: %v", err)
+	}
+	if err := bm.RestoreBackup(latestName); err != nil {
+		t.Fatalf("RestoreBackup(%s) failed: %v", latestName, err)
+	}
+	var restoredCount int
+	if err := dbm.GetDB().QueryRow("SELECT COUNT(*) FROM test_data;").Scan(&restoredCount); err != nil || restoredCount != 1 {
+		t.Fatalf("Expected 1 restored row in active DB, got %d (err=%v)", restoredCount, err)
+	}
 }

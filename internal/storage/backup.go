@@ -21,6 +21,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -246,4 +247,103 @@ func (b *BackupManager) ListBackups() ([]BackupInfo, error) {
 	})
 
 	return backups, nil
+}
+
+// ResolveBackupPath validates filename to prevent path traversal and returns its safe absolute path inside backupDir.
+func (b *BackupManager) ResolveBackupPath(filename string) (string, error) {
+	clean := filepath.Base(strings.TrimSpace(filename))
+	if clean == "" || clean == "." || clean == ".." || clean != filename || strings.ContainsAny(clean, `/\`) {
+		return "", fmt.Errorf("invalid backup filename")
+	}
+	if !strings.HasPrefix(clean, "monitor_") || (!strings.HasSuffix(clean, ".db") && !strings.HasSuffix(clean, ".sql")) {
+		return "", fmt.Errorf("unsupported backup filename")
+	}
+
+	fullPath := filepath.Join(b.backupDir, clean)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("backup file not found: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("invalid backup target")
+	}
+	return fullPath, nil
+}
+
+// RestoreBackup validates and restores a snapshot into the currently configured database engine.
+func (b *BackupManager) RestoreBackup(filename string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	fullPath, err := b.ResolveBackupPath(filename)
+	if err != nil {
+		return err
+	}
+	if b.dbManager == nil {
+		return fmt.Errorf("db manager not initialized")
+	}
+
+	if strings.HasSuffix(fullPath, ".sql") {
+		cfg := b.dbManager.GetConfig()
+		if b.dbManager.GetDriver() != "postgres" {
+			return fmt.Errorf("connect to PostgreSQL first before restoring a .sql backup")
+		}
+		if _, err := exec.LookPath("pg_restore"); err != nil {
+			return fmt.Errorf("pg_restore is not installed or not in PATH: %w", err)
+		}
+		args := []string{
+			"--clean", "--if-exists",
+			"-h", cfg.Host,
+			"-p", fmt.Sprintf("%d", cfg.Port),
+			"-U", cfg.User,
+			"-d", cfg.DBName,
+			fullPath,
+		}
+		cmd := exec.Command("pg_restore", args...)
+		if cfg.Password != "" {
+			cmd.Env = append(os.Environ(), fmt.Sprintf("PGPASSWORD=%s", cfg.Password))
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("pg_restore execution failed: %v, output: %s", err, string(out))
+		}
+		return nil
+	}
+
+	// SQLite backup integrity check before touching live database
+	checkDB, err := sql.Open("sqlite", fullPath)
+	if err != nil {
+		return fmt.Errorf("failed opening sqlite backup: %w", err)
+	}
+	var quickCheck string
+	err = checkDB.QueryRow("PRAGMA quick_check;").Scan(&quickCheck)
+	_ = checkDB.Close()
+	if err != nil || !strings.EqualFold(quickCheck, "ok") {
+		return fmt.Errorf("backup failed sqlite integrity check (%q): %w", quickCheck, err)
+	}
+
+	targetPath := b.dbManager.GetConfig().FilePath
+	return b.dbManager.RestoreSQLiteFile(targetPath, fullPath)
+}
+
+// StartScheduledBackups runs periodic automatic snapshots in background until ctx is cancelled.
+func (b *BackupManager) StartScheduledBackups(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if info, err := b.CreateBackup(); err != nil {
+					log.Printf("[BACKUP] Scheduled backup failed: %v", err)
+				} else {
+					log.Printf("[BACKUP] Scheduled backup saved: %s (%d bytes)", info.Filename, info.SizeBytes)
+				}
+			}
+		}
+	}()
 }

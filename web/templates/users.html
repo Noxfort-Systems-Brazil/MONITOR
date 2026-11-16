@@ -155,12 +155,27 @@
                                         <td class="text-muted small font-monospace">
                                             {{ .CreatedAt.Format "2006-01-02 15:04" }}
                                         </td>
-                                        <td class="text-end pe-4">
+                                        <td class="text-end pe-4 text-nowrap">
                                             {{ if eq .Username $.Superuser }}
+                                            <button class="btn btn-outline-warning btn-sm me-1 btn-reset-password" data-username="{{ .Username }}" title="Alterar Senha">
+                                                <i class="fa-solid fa-key"></i>
+                                            </button>
+                                            <button class="btn btn-outline-info btn-sm me-1 btn-unlock-user" data-username="{{ .Username }}" title="Desbloquear Tentativas">
+                                                <i class="fa-solid fa-unlock"></i>
+                                            </button>
                                             <button class="btn btn-outline-secondary btn-sm" disabled title="A conta de Superusuário não pode ser excluída" data-i18n-title="users_superuser_lock_tooltip">
                                                 <i class="fa-solid fa-lock"></i>
                                             </button>
                                             {{ else }}
+                                            <button class="btn btn-outline-warning btn-sm me-1 btn-reset-password" data-username="{{ .Username }}" title="Redefinir Senha">
+                                                <i class="fa-solid fa-key"></i>
+                                            </button>
+                                            <button class="btn btn-outline-primary btn-sm me-1 btn-toggle-role" data-username="{{ .Username }}" data-role="{{ .Role }}" title="Alternar Perfil (Admin / Operador)">
+                                                <i class="fa-solid fa-user-tag"></i>
+                                            </button>
+                                            <button class="btn btn-outline-info btn-sm me-1 btn-unlock-user" data-username="{{ .Username }}" title="Desbloquear Tentativas">
+                                                <i class="fa-solid fa-unlock"></i>
+                                            </button>
                                             <button class="btn btn-outline-danger btn-sm btn-delete-user" data-username="{{ .Username }}" title="Remover Usuário" data-i18n-title="users_delete_tooltip">
                                                 <i class="fa-solid fa-trash-can"></i>
                                             </button>
@@ -179,6 +194,31 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Redefinir Senha -->
+<div class="modal fade" id="modalResetUserPassword" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-light border-secondary shadow-lg">
+            <div class="modal-header border-secondary bg-black bg-opacity-25">
+                <h5 class="modal-title"><i class="fa-solid fa-key text-warning me-2"></i> Redefinir Senha — <span id="reset-target-label" class="font-monospace text-info"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                <form id="resetUserPasswordForm">
+                    <input type="hidden" id="reset_target_username" name="username">
+                    <div class="mb-3">
+                        <label for="reset_new_password" class="form-label small text-muted fw-bold">NOVA SENHA (MÍN. 8 CARACTERES E REQUISITOS)</label>
+                        <input type="password" class="form-control bg-black text-white border-secondary" id="reset_new_password" required minlength="8">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer border-secondary bg-black bg-opacity-25">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" id="btn-confirm-reset-pass" class="btn btn-warning text-dark fw-bold">Salvar Nova Senha</button>
             </div>
         </div>
     </div>

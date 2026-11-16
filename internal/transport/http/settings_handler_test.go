@@ -230,3 +230,68 @@ func TestSettingsHandler_HandleTest_Telegram(t *testing.T) {
 		t.Errorf("Expected 500 on telegram test error, got %d", rrFail.Code)
 	}
 }
+
+func TestSettingsHandler_ServePageRedactsSecretsAndPreservesPartialUpdates(t *testing.T) {
+	repo := &mockSettingsRepoForHandler{
+		settings: &domain.Settings{
+			ID:               1,
+			SMTPHost:         "smtp.gmail.com",
+			SMTPPort:         587,
+			SMTPUser:         "alerts@noxfort.com",
+			SMTPPass:         "super-secret-smtp-pass",
+			TelegramBotToken: "998877:SUPER_SECRET_BOT_TOKEN",
+			DuckDNSToken:     "duck-secret-token",
+			MqttAddress:      "tcp://127.0.0.1:1883",
+		},
+	}
+	handler := NewSettingsHandler(repo, &mockConnectionTester{})
+
+	// 1. Rendered HTML must NEVER expose plaintext secrets
+	reqPage := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	rrPage := httptest.NewRecorder()
+	handler.ServePage(rrPage, reqPage)
+	if rrPage.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on ServePage, got %d: %s", rrPage.Code, rrPage.Body.String())
+	}
+	body := rrPage.Body.String()
+	for _, secret := range []string{"super-secret-smtp-pass", "998877:SUPER_SECRET_BOT_TOKEN", "duck-secret-token"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("SECURITY VIOLATION: secret %q leaked in rendered HTML", secret)
+		}
+	}
+
+	// 2. Saving only Telegram section must preserve SMTPPass and DuckDNSToken without hidden inputs
+	tgForm := url.Values{}
+	tgForm.Set("form_section", "telegram")
+	tgForm.Set("telegram_bot_token", "112233:NEW_BOT_TOKEN")
+	reqSaveTG := httptest.NewRequest(http.MethodPost, "/settings/save", strings.NewReader(tgForm.Encode()))
+	reqSaveTG.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rrSaveTG := httptest.NewRecorder()
+	handler.HandleSave(rrSaveTG, reqSaveTG)
+
+	if repo.settings.SMTPPass != "super-secret-smtp-pass" {
+		t.Errorf("Expected SMTPPass to be preserved when saving Telegram form, got %q", repo.settings.SMTPPass)
+	}
+	if repo.settings.TelegramBotToken != "112233:NEW_BOT_TOKEN" {
+		t.Errorf("Expected TelegramBotToken updated, got %q", repo.settings.TelegramBotToken)
+	}
+
+	// 3. Saving SMTP form with blank password for same user must keep existing SMTPPass
+	smtpForm := url.Values{}
+	smtpForm.Set("form_section", "smtp")
+	smtpForm.Set("smtp_host", "smtp.gmail.com")
+	smtpForm.Set("smtp_port", "587")
+	smtpForm.Set("smtp_user", "alerts@noxfort.com")
+	smtpForm.Set("smtp_pass", "")
+	reqSaveSMTP := httptest.NewRequest(http.MethodPost, "/settings/save", strings.NewReader(smtpForm.Encode()))
+	reqSaveSMTP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rrSaveSMTP := httptest.NewRecorder()
+	handler.HandleSave(rrSaveSMTP, reqSaveSMTP)
+
+	if repo.settings.SMTPPass != "super-secret-smtp-pass" {
+		t.Errorf("Expected blank SMTPPass to preserve existing password for same SMTPUser, got %q", repo.settings.SMTPPass)
+	}
+	if repo.settings.TelegramBotToken != "112233:NEW_BOT_TOKEN" {
+		t.Errorf("Expected TelegramBotToken preserved when saving SMTP section, got %q", repo.settings.TelegramBotToken)
+	}
+}

@@ -44,6 +44,9 @@ class DatabaseView {
         this.provAlert = document.getElementById('prov-alert');
         this.provTargetUser = document.getElementById('prov-target-user');
         this.provisionForm = document.getElementById('provisionUserForm');
+        this.btnCreateBackup = document.getElementById('btn-create-backup');
+        this.backupsTableBody = document.getElementById('backups-table-body');
+        this.backupFeedback = document.getElementById('backup-feedback');
         this.alertTimeout = null;
     }
 
@@ -267,6 +270,82 @@ class DatabaseView {
         this.provisionForm?.addEventListener('submit', (e) => {
             e.preventDefault();
             if (onSubmitProvision) onSubmitProvision();
+        });
+    }
+
+    showBackupFeedback(msg, type = 'info') {
+        if (!this.backupFeedback) return;
+        this.backupFeedback.className = `alert alert-${type} m-3 small`;
+        this.backupFeedback.textContent = msg;
+        this.backupFeedback.classList.remove('d-none');
+    }
+
+    setCreateBackupState(loading) {
+        if (!this.btnCreateBackup) return;
+        this.btnCreateBackup.disabled = Boolean(loading);
+        this.btnCreateBackup.innerHTML = loading
+            ? '<span class="spinner-border spinner-border-sm me-1"></span> Gerando...'
+            : '<i class="fa-solid fa-plus me-1"></i> Gerar Backup Agora';
+    }
+
+    renderBackups(list, onRestore) {
+        if (!this.backupsTableBody) return;
+        this.backupsTableBody.replaceChildren();
+
+        if (!Array.isArray(list) || list.length === 0) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 5;
+            td.className = 'text-center text-muted py-4 small';
+            td.textContent = 'Nenhum backup registrado ainda.';
+            tr.appendChild(td);
+            this.backupsTableBody.appendChild(tr);
+            return;
+        }
+
+        list.forEach(item => {
+            const tr = document.createElement('tr');
+
+            const tdFile = document.createElement('td');
+            tdFile.className = 'ps-3 font-monospace small text-info';
+            tdFile.textContent = item.filename || '';
+
+            const tdDriver = document.createElement('td');
+            const badge = document.createElement('span');
+            badge.className = item.driver === 'postgres' ? 'badge bg-primary' : 'badge bg-warning text-dark';
+            badge.textContent = (item.driver || 'sqlite').toUpperCase();
+            tdDriver.appendChild(badge);
+
+            const tdSize = document.createElement('td');
+            tdSize.className = 'small text-muted';
+            const kb = ((item.size_bytes || 0) / 1024).toFixed(1);
+            tdSize.textContent = `${kb} KB`;
+
+            const tdDate = document.createElement('td');
+            tdDate.className = 'small text-muted font-monospace';
+            tdDate.textContent = item.created_at ? new Date(item.created_at).toLocaleString() : '-';
+
+            const tdAct = document.createElement('td');
+            tdAct.className = 'text-end pe-3 text-nowrap';
+
+            const dlLink = document.createElement('a');
+            dlLink.className = 'btn btn-sm btn-outline-info me-1';
+            dlLink.href = `/api/settings/database/backups/download?file=${encodeURIComponent(item.filename || '')}`;
+            dlLink.title = 'Baixar Backup';
+            dlLink.innerHTML = '<i class="fa-solid fa-download"></i>';
+
+            const restoreBtn = document.createElement('button');
+            restoreBtn.type = 'button';
+            restoreBtn.className = 'btn btn-sm btn-outline-warning';
+            restoreBtn.title = 'Restaurar Banco';
+            restoreBtn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i>';
+            restoreBtn.addEventListener('click', () => {
+                if (onRestore) onRestore(item.filename);
+            });
+
+            tdAct.append(dlLink, restoreBtn);
+            tr.append(tdFile, tdDriver, tdSize, tdDate, tdAct);
+            this.backupsTableBody.appendChild(tr);
         });
     }
 }

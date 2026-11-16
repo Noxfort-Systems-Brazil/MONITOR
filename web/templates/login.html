@@ -132,8 +132,15 @@ form.addEventListener('submit', async (e) => {
             alertBox.classList.remove('d-none');
             setTimeout(() => window.location.replace('/'), 500);
         } else {
+            let msg = data.message || window._t('auth_invalid_credentials', 'Credenciais inválidas.');
+            if (data.is_lockdown) {
+                const waitSec = data.retry_after_seconds ? ` (${data.retry_after_seconds}s)` : '';
+                msg = `Conta temporariamente bloqueada por excesso de tentativas${waitSec}.`;
+            } else if (data.failed_attempts > 0 && data.max_attempts > 0) {
+                msg += ` (Tentativas: ${data.failed_attempts}/${data.max_attempts})`;
+            }
             alertBox.className = 'alert alert-danger shadow-sm mb-3 small';
-            alertBox.textContent = '❌ ' + (data.message || window._t('auth_invalid_credentials', 'Credenciais inválidas.'));
+            alertBox.textContent = '❌ ' + msg;
             alertBox.classList.remove('d-none');
             submitBtn.disabled = false;
             submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket me-2"></i><span data-i18n="auth_btn_login">' + (window._t('auth_btn_login', 'Entrar no Monitor')) + '</span>';

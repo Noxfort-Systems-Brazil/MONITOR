@@ -26,7 +26,7 @@
 
 **Noxfort Monitor™** is an industrial event-driven observability platform developed in Go to monitor distributed systems, autonomous agents (such as **Synapse** and **Carina**), and industrial IoT hardware.
 
-It features a dual-engine database persistence layer (**PostgreSQL** for enterprise network operations and embedded **SQLite** with live hot-reloading), concurrent telemetry ingestion via **MQTT** and **HTTP REST**, silent failure detection through the **Watchdog Engine**, multi-channel alert dispatching with Role-Based Access Control (**RBAC**), secure reverse tunneling via **Ngrok** for edge nodes on remote networks, and a native desktop interface powered by **Wails v2** with **Headless** server mode support.
+It features a dual-engine database persistence layer (**PostgreSQL** for enterprise network operations and embedded **SQLite** in WAL mode with live hot-reloading), **Zero-Trust** telemetry ingestion via **MQTT** and **HTTP REST** (`POST /api/pair` + `X-Device-Token`), silent failure detection through the **Watchdog Engine**, multi-channel alert dispatching with retry backoff and strict Role-Based Access Control (**RBAC**), persistent SHA-256 hashed sessions with brute-force lockout, **DuckDNS + Caddy** automatic HTTPS / **Ngrok** reverse tunneling, automated data retention & hot backups/restore, and a native desktop interface powered by **Wails v2** with **Headless** and **Demo** server modes.
 
 ---
 
@@ -39,9 +39,9 @@ Explore the full architecture, internal mechanics, and developer guides for the 
 | 📚 **Documentation Hub** | Central Multi-Language Index & Direct Topic Navigation Matrix | [Explore Hub](docs/README.md) |
 | 🗺️ **Master MOC** | Obsidian Knowledge Graph, Directory Map & Technical Architecture | [View MOC](docs/INDEX.md) |
 | 🏛️ **Core Architecture** | Event-Driven Architecture (EDA), SOLID Layers & Goroutine Concurrency | [View Blueprint](ARCHITECTURE.md) |
-| 📡 **API & Protocols** | High-throughput MQTT (`tcp://:1883`) & HTTP REST Ingestion (`:22100`) | [View API Reference](docs/API_REFERENCE.md) |
-| 🗄️ **Dual-Engine Persistence** | PostgreSQL & SQLite, Live Hot-Reload (`DBManager`) & Zero-Downtime Migration | [View DB Specs](docs/DATABASE.md) |
-| 🔐 **Security & RBAC** | RoleAdmin vs RoleOperator, Salted Hashes, Session Cookies & Bootstrapping | [View Security](docs/SECURITY.md) |
+| 📡 **API & Protocols** | Zero-Trust Pairing (`POST /api/pair`), MQTT (`noxfort/telemetry/#`) & HTTP REST (`:22100`) | [View API Reference](docs/API_REFERENCE.md) |
+| 🗄️ **Dual-Engine Persistence** | PostgreSQL & SQLite WAL, `DBManager` Hot-Reload, Backup/Restore & Retention | [View DB Specs](docs/DATABASE.md) |
+| 🔐 **Security & RBAC** | Read-Only Operator RBAC, Persistent Sessions, Brute-Force Lockout & PBKDF2 | [View Security](docs/SECURITY.md) |
 | 🌐 **Remote Access & WAN** | DuckDNS Dynamic DNS & Embedded Ngrok Tunnel for Edge Ingestion | [View Remote Access](docs/REMOTE_ACCESS.md) |
 | 🛡️ **Caddy & Automatic HTTPS** | Reverse Proxy with DuckDNS DNS-01 ACME Challenge & WSS MQTT Proxy | [View Caddy Guide](docs/CADDY_INTEGRATION.md) |
 | 🖥️ **Desktop App & Headless** | Wails v2 Native GUI, Kernel Flock Lock, Systray & Headless Telemetry Daemon | [View Desktop Guide](docs/DESKTOP_APP.md) |
@@ -55,19 +55,19 @@ Explore the full architecture, internal mechanics, and developer guides for the 
 
 ## ⚡ Core Architecture Highlights
 
-- **Dual Telemetry Ingestion (MQTT + HTTP REST):** Non-blocking concurrent processing over MQTT `tcp://127.0.0.1:1883` and HTTP REST `POST /api/telemetry` on port `22100`. Direct web browser access to HTML routes is blocked (403 Forbidden) to guarantee control operations remain confined to the native desktop application.
-- **Intelligent Noise Filter:** Incoming keep-alive signals ("*system ok*", "*heartbeat*", "*online*") update device timestamps in memory without creating unneeded database writes or alert noise.
-- **Dual-Engine Persistence (PostgreSQL & SQLite):** Central `DBManager` orchestrates runtime database switching via the control console without dropping active client connections or restarting the process.
-- **High-Throughput Telemetry Buffering:** Dedicated `BufferedTelemetryWriter` worker handles asynchronous batch flushes to storage, preventing I/O bottlenecks under heavy IoT ingest loads.
+- **Zero-Trust Telemetry Ingestion (MQTT + HTTP REST):** Non-blocking concurrent processing over MQTT `tcp://127.0.0.1:1883` (`noxfort/telemetry/#`, enforced by `MONITOR_MQTT_STRICT`) and HTTP REST `POST /api/telemetry` on port `22100` with out-of-band device pairing (`POST /api/pair`, 5-minute TTL, `nox_live_` API keys via `X-Device-Token` / `Bearer`) and ±5m anti-replay validation. Direct web browser access to HTML routes on the external port is blocked (`403 Forbidden`).
+- **Live Dashboard & Intelligent Noise Filter:** Real-time dashboard polling (`GET /api/dashboard/summary` every 10s) classifying devices across 5 lifecycle states (`ONLINE`, `OFFLINE`, `PENDING`, `PAUSED`, `WAITING`), while keep-alive signals ("*system ok*", "*heartbeat*", "*online*") update heartbeats without alert noise and Maintenance Mode (`Enabled=false`) suppresses paused devices.
+- **Dual-Engine Persistence (PostgreSQL & SQLite WAL):** Central `DBManager` orchestrates runtime database switching with single-transaction `MigrateData` across SQLite (WAL journaling + busy timeout) and PostgreSQL without dropping connections or restarting.
+- **High-Throughput Telemetry Buffering:** Dedicated `BufferedTelemetryWriter` worker handles asynchronous batch flushes to storage, exporting live `noxfort_telemetry_buffer_depth` metrics.
 - **CGO-Free Embedded Engine:** Built using `modernc.org/sqlite`, completely removing CGO compiler and C-toolchain dependencies during cross-compilation.
-- **Watchdog Engine (Silent Failure Detection):** Dedicated ticker evaluating `LastSeen` heartbeats; synthesizes `CRITICAL` `System OFFLINE` incidents when nodes go silent for > 5 minutes and auto-resolves when transmission resumes.
-- **Role-Based Alert Routing (RBAC):** Goroutine-based concurrent alert dispatching via Email (SMTP) and Telegram Bot (MarkdownV2) segregated by responsibility (Hardware $\rightarrow$ Technicians, Software $\rightarrow$ Programmers, Global $\rightarrow$ Administrators).
-- **Remote Access & Automatic HTTPS (DuckDNS & Caddy / Ngrok):** Native dynamic DNS updates via DuckDNS, automated Let's Encrypt TLS certificates using Caddy with DNS-01 ACME validation, plus optional Ngrok reverse tunneling for edge nodes behind firewalls and CGNAT.
-- **Native Observability & Prometheus Metrics:** Dedicated `/healthz` (liveness), `/api/health` (component diagnostics & DB latency), and `/metrics` (Prometheus exposition format) endpoints for real-time operational monitoring.
-- **Zero-Downtime Hot Backups & Retention:** Atomic snapshotting via SQLite `VACUUM INTO` and PostgreSQL support with automated 7-day retention rotation, accessible via Web UI or `make backup`.
-- **Hardened MQTT & PBKDF2 Credentials:** Enforced authentication (`allow_anonymous false`) with automated password generation (`make broker-auth`) and Paho client credential integration.
+- **Watchdog Engine & Reliable Alert Dispatch:** Dedicated 30-second ticker evaluating `LastSeen` heartbeats (> 5m outage detection + expired `PENDING` pairing cleanup); concurrent Email (SMTP with implicit TLS on port 465 and CRLF sanitization) and Telegram (MarkdownV2) dispatching with retry backoff, graceful shutdown draining, and `telemetry_id` audit linkage.
+- **Strict Operator RBAC, Persistent Sessions & Brute-Force Lockout:** `OPERATOR` accounts operate in strictly read-only mode (blocked from mutations and DB backups with content-negotiated JSON or `forbidden.html` 403 views); `DBSessionStore` persists SHA-256 session token hashes in DB; `LoginAttemptTracker` enforces account+IP brute-force lockouts (`429 Too Many Requests`); HTML templates redact stored secrets (`SMTPPass`, `TelegramBotToken`, `DuckDNSToken`, active `ApiKey`).
+- **Remote Access & Automatic HTTPS (DuckDNS & Caddy / Ngrok):** Native dynamic DNS updates via DuckDNS, automated Let's Encrypt TLS certificates using Caddy with DNS-01 ACME validation and `X-Forwarded-*` trust (`TRUSTED_PROXIES`), plus optional Ngrok reverse tunneling.
+- **Native Observability & Prometheus Metrics:** Dedicated `/healthz` (liveness), `/api/health` (component diagnostics & DB latency), and `/metrics` (Prometheus exposition including `noxfort_devices_by_status`, `noxfort_telemetry_ingested_total`, `noxfort_telemetry_rejected_total`, `noxfort_alerts_dispatched_total`, and `noxfort_telemetry_buffer_depth`).
+- **Scheduled Hot Backups, One-Click Restore & Retention Pruning:** Atomic snapshotting via SQLite `VACUUM INTO` and `pg_dump` with scheduled execution (`MONITOR_BACKUP_INTERVAL_HOURS`), secure download/restore (`PRAGMA quick_check` / `pg_restore`) via Web UI, and automated data pruning (`RetentionManager`, `MONITOR_RETENTION_DAYS=90`).
+- **Hardened MQTT & PBKDF2 Credentials:** Enforced Mosquitto authentication (`allow_anonymous false`) via `make broker-auth`, PBKDF2 HMAC-SHA256 user password hashing (100,000 iterations), and background MQTT reconnect on boot failures or `/settings` changes.
 - **Unified CI/CD & Frontend Quality:** GitHub Actions workflow executing `go vet`, race-detected Go tests, secret leakage audits, and sub-second Vitest frontend DOM tests.
-- **Wails v2 Desktop GUI & Headless Mode:** WebKitGTK desktop interface with atomic kernel file locking (`syscall.Flock`) single-instance enforcement and minimize-to-tray; or screenless background ingestion daemon using `--headless`.
+- **Wails v2 Desktop GUI, Headless & Demo Modes:** WebKitGTK desktop interface with atomic kernel file locking (`syscall.Flock`) and minimize-to-tray, `--headless` server daemon mode, or `--demo` HTTP UI mode for automated Playwright recordings (`make record-demo`).
 
 ---
 
@@ -131,7 +131,7 @@ sudo dpkg -i build_deb/noxfort-monitor_2.0.1_amd64.deb
 
 ## 🔐 Authentication & Default Credentials
 
-* **Operator Interface**: Accessible exclusively via the native desktop application window. (Direct web browser access over external HTTP ports is disabled with HTTP 403 Forbidden; external port `22100` serves `POST /api/telemetry` for IoT nodes).
+* **Operator Interface**: Accessible exclusively via the native desktop application window (or `--demo` flag for automated demo recording). Direct web browser access over external HTTP ports is disabled with HTTP 403 Forbidden; external port `22100` serves `POST /api/pair`, `POST /api/telemetry`, `/healthz`, `/api/health`, and `/metrics`.
 * **First-Access Default Credentials**: If no `.env` file is present, the default bootstrap credentials for logging into the desktop application are:
   * **Username**: `admin`
   * **Password**: `Admin@Noxfort2026!`
@@ -140,8 +140,9 @@ sudo dpkg -i build_deb/noxfort-monitor_2.0.1_amd64.deb
   cp .env.example .env
   chmod 600 .env
   # Set MONITOR_ADMIN_USER, MONITOR_ADMIN_PASSWORD, MQTT_USER, MQTT_PASSWORD
+  # Optional tuning: MONITOR_MQTT_STRICT, MONITOR_RETENTION_DAYS, MONITOR_BACKUP_INTERVAL_HOURS, TRUSTED_PROXIES
   ```
-* **Persistence Location**: In local SQLite mode, the database resides at `~/Documentos/Monitor/monitor_logs.db`. In PostgreSQL mode, data resides on the configured database server.
+* **Persistence Location**: In local SQLite mode, the database resides at `~/Documentos/Monitor/monitor_logs.db` (backups under `~/Documentos/Monitor/backups/`). In PostgreSQL mode, data resides on the configured database server.
 
 ---
 

@@ -22,13 +22,16 @@ package http
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 )
 
 const sessionCookieName = "noxfort_session"
 
-// ExtractSessionToken retrieves the session token from cookies, Authorization headers, or custom headers.
+// ExtractSessionToken retrieves the session token from cookies or Authorization/session headers.
+// Query string tokens are intentionally rejected to avoid leaking secrets in URLs and proxy logs.
 func ExtractSessionToken(r *http.Request) string {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 		return cookie.Value
@@ -39,10 +42,83 @@ func ExtractSessionToken(r *http.Request) string {
 	if token := strings.TrimSpace(r.Header.Get("X-Session-Token")); token != "" {
 		return token
 	}
-	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
-		return token
-	}
 	return ""
+}
+
+// isTrustedProxyIP returns true when remoteIP is a loopback, private (e.g., Docker bridge), or explicitly trusted address.
+func isTrustedProxyIP(remoteIP net.IP) bool {
+	if remoteIP == nil {
+		return false
+	}
+	if remoteIP.IsLoopback() || remoteIP.IsPrivate() {
+		return true
+	}
+	if raw := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); raw != "" {
+		for _, entry := range strings.Split(raw, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			if _, cidr, err := net.ParseCIDR(entry); err == nil && cidr.Contains(remoteIP) {
+				return true
+			}
+			if ip := net.ParseIP(entry); ip != nil && ip.Equal(remoteIP) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func parseRemoteIP(addr string) net.IP {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return nil
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+	return net.ParseIP(addr)
+}
+
+// ExtractClientIP determines the client's real IP address, honoring forwarded headers only from trusted proxies.
+func ExtractClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	remoteIP := parseRemoteIP(r.RemoteAddr)
+	if isTrustedProxyIP(remoteIP) {
+		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+			for _, part := range strings.Split(xff, ",") {
+				if ip := net.ParseIP(strings.TrimSpace(part)); ip != nil {
+					return ip.String()
+				}
+			}
+		}
+		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+			if ip := parseRemoteIP(xri); ip != nil {
+				return ip.String()
+			}
+		}
+	}
+	if remoteIP != nil {
+		return remoteIP.String()
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+// IsHTTPSRequest detects whether the client reached the server over HTTPS directly or via a trusted TLS proxy.
+func IsHTTPSRequest(r *http.Request) bool {
+	if r != nil && r.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("MONITOR_USE_HTTPS")), "true") {
+		return true
+	}
+	if r != nil && isTrustedProxyIP(parseRemoteIP(r.RemoteAddr)) {
+		return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+	}
+	return false
 }
 
 // parseCredentials extracts username and password from form-encoded or JSON payloads.

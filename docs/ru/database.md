@@ -1,64 +1,74 @@
 # 🗄️ База данных и двухдвижковая персистентность
 
-Данный документ описывает слой хранения данных **Noxfort Monitor™ v2.0**, включая одновременную поддержку PostgreSQL и SQLite, динамический менеджер переключения (`DBManager`), автоматическую миграцию и адаптер SQL-диалектов.
+Данный документ описывает слой хранения данных **Noxfort Monitor™ v2.0**: работу PostgreSQL и SQLite (режим WAL), горячее переключение (`DBManager`), транзакционную миграцию 9 таблиц, резервное копирование/восстановление и автоматическое удаление устаревших данных.
 
 ⬅️ [Главный Хаб](../README.md) | 🏛️ [Архитектура](architecture.md) | 📡 [API](api_reference.md) | 🔐 [Безопасность](security.md)
 
 ---
 
-## 1. Сосуществование двух СУБД
+## 1. Сосуществование двух СУБД и режим WAL
 
-Noxfort Monitor рассчитан как на автономные локальные узлы, так и на корпоративные отказоустойчивые кластеры:
+Оба диалекта поддерживают идентичную схему из **9 таблиц и 12 индексов**:
 
-| Параметр | SQLite (Чистый Go) | PostgreSQL |
+| Параметр | SQLite (Чистый Go, режим WAL) | PostgreSQL |
 |---|---|---|
 | **Go-драйвер** | `modernc.org/sqlite` (без CGO) | `github.com/lib/pq` |
-| **Сценарий** | Локальные рабочие места, периферийные узлы | Промышленные серверы, высокая нагрузка |
+| **Настройки** | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000` | Выделенная схема (`schema_monitor`) |
+| **Сценарий** | Локальные узлы, автономные шлюзы | Промышленные серверы, высокая нагрузка |
 | **Файл / Хост** | `~/Documentos/Monitor/monitor_logs.db` | TCP-сервер (порт `5432`) |
-| **Изоляция** | Локальный файл БД | Выделенная схема (`schema_monitor`) |
-| **Зависимости** | Нет (встроен в бинарный файл) | Сетевой сервер PostgreSQL 12+ |
+| **Зависимости** | Нет (встроен в бинарный файл Go) | PostgreSQL 12+ |
 
 ---
 
 ## 2. Горячая перезагрузка (`DBManager`)
 
-Компонент `DBManager` выполняет переключение базы данных во время работы без перезапуска процесса и без сброса активных сессий:
-
 ```mermaid
 graph TD
-    UI[Веб-интерфейс / Десктоп] -->|Сохранить настройки| DBHandler[DatabaseHandler]
+    UI[Веб-интерфейс / Десктоп] -->|Сохранить / Восстановить| DBHandler[DatabaseHandler]
     DBHandler -->|Тест / Миграция / Переключение| DBManager[Центральный DBManager]
-    
-    subgraph "Перезагружаемые репозитории"
+
+    subgraph "7 Перезагружаемых репозиториев"
         DeviceRepo[DeviceRepository]
         ContactRepo[ContactRepository]
         SettingsRepo[SettingsRepository]
         TelemetryRepo[TelemetryRepository]
         UserRepo[UserRepository]
         AuditRepo[AuditRepository]
+        SessionStore[DBSessionStore]
     end
-    
-    DBManager -->|SetDB / Атомарная замена пула| DeviceRepo
-    DBManager -->|SetDB / Атомарная замена пула| ContactRepo
-    DBManager -->|SetDB / Атомарная замена пула| SettingsRepo
-    DBManager -->|SetDB / Атомарная замена пула| TelemetryRepo
-    DBManager -->|SetDB / Атомарная замена пула| UserRepo
-    DBManager -->|SetDB / Атомарная замена пула| AuditRepo
+
+    DBManager -->|"SetDB(db, driver)"| DeviceRepo
+    DBManager -->|"SetDB(db, driver)"| ContactRepo
+    DBManager -->|"SetDB(db, driver)"| SettingsRepo
+    DBManager -->|"SetDB(db, driver)"| TelemetryRepo
+    DBManager -->|"SetDB(db, driver)"| UserRepo
+    DBManager -->|"SetDB(db, driver)"| AuditRepo
+    DBManager -->|"SetDB(db, driver)"| SessionStore
 ```
 
-Все репозитории реализуют интерфейс `ReloadableRepository`:
+Каждый репозиторий реализует интерфейс `ReloadableRepository`:
+
 ```go
 type ReloadableRepository interface {
-    SetDB(db *sql.DB)
+    SetDB(db *sql.DB, driver string)
 }
 ```
 
 ---
 
-## 3. Автоматическая миграция (`MigrateData`)
+## 3. Единая транзакционная миграция (`MigrateData`)
 
-При смене движка между SQLite и PostgreSQL процедура `MigrateData()` обеспечивает полную целостность:
-1. Открывает параллельные подключения к исходной и целевой базам.
-2. Извлекает и переносит все сущности: устройства (`devices`), контакты (`contacts`), глобальные настройки (`settings`), пользователей (`users`), историю телеметрии (`telemetry`), журнал аудита безопасности (`security_audit_logs`), логи доставки оповещений (`alert_dispatch_logs`) и переходы состояний устройств (`device_state_transitions`).
-3. Выполняет операции upsert с вызовом `storage.AdaptQuery()` для адаптации синтаксиса (`ON CONFLICT (id) DO UPDATE`).
-4. Перенаправляет репозитории на новую базу и фиксирует конфигурацию на диске.
+При переключении SQLite $\leftrightarrow$ PostgreSQL:
+1. `Migrator.MigrateData` переносит все **9 таблиц** (`devices` с `api_key`, `status`, `expires_at`, `telemetry` с `device_id`, `settings`, `contacts`, `users`, `sessions`, `security_audit_logs`, `alert_dispatch_logs`, `device_state_transitions`) внутри **одной SQL-транзакции**.
+2. Запросы адаптируются через `storage.AdaptQuery()`.
+3. При любой ошибке транзакция полностью откатывается, а `DBManager.Switch` прерывается, исключая частичное состояние (*split-brain*).
+
+---
+
+## 4. Горячие резервные копии, восстановление и хранение данных
+
+* **Резервные копии (`BackupManager`)**: `VACUUM INTO` (SQLite) и `pg_dump -F c` (PostgreSQL). `BackupManager.StartScheduledBackups` работает по расписанию `MONITOR_BACKUP_INTERVAL_HOURS` (по умолчанию `24ч`), храня до **`7`** копий.
+* **Скачивание и восстановление**:
+  * `GET /api/settings/database/backups/download` защищен функцией `ResolveBackupPath`.
+  * `POST /api/settings/database/restore` проверяет SQLite командой `PRAGMA quick_check` перед `RestoreSQLiteFile`, либо применяет `pg_restore` для PostgreSQL.
+* **Автоочистка (`RetentionManager`)**: Каждые **`24` часа** удаляет записи старше `MONITOR_RETENTION_DAYS` (по умолчанию **`90` дней**) из `telemetry`, `alert_dispatch_logs`, `security_audit_logs` и `device_state_transitions`.

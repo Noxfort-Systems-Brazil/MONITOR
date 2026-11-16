@@ -278,5 +278,12 @@
   "settings_reconfigure_confirm": "您确定要重新配置警报系统吗？",
   "settings_email_sending": "发送中...",
   "settings_email_test_success": "测试邮件发送成功！",
-  "settings_telegram_prompt_id": "输入您的 Telegram Chat ID 以接收测试消息：\n（在 Telegram 上向 @userinfobot 发送消息以获取您的 ID）"
+  "settings_telegram_prompt_id": "输入您的 Telegram Chat ID 以接收测试消息：\n（在 Telegram 上向 @userinfobot 发送消息以获取您的 ID）",
+  "rbac_badge_readonly": "只读",
+  "rbac_operator_readonly_notice": "只读模式（操作员）：只有管理员账户可以创建、编辑或删除资源。",
+  "rbac_admin_only_section": "仅限管理员配置。",
+  "forbidden_title": "访问受限（只读）",
+  "forbidden_operator_hint": "您的账户处于操作员配置（只读模式）。只有管理员级别的账户才能创建、编辑或删除监控器资源。",
+  "forbidden_btn_back": "返回",
+  "forbidden_btn_dashboard": "返回主面板"
 }

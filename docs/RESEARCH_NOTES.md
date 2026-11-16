@@ -51,14 +51,26 @@ Evolved the [`internal/tunnel`](REMOTE_ACCESS.md) and [`caddy/`](CADDY_INTEGRATI
 
 ---
 
-## 4. Roadmap & Future Research
+## 4. Zero-Trust Device Pairing, Persistent Sessions & Observability Hardening
 
-### 4.1 gRPC Expansion for Monitor Federation
+### Context
+As Noxfort Monitor moved into 24/7 multi-operator industrial production, anonymous HTTP/MQTT telemetry ingestion, in-memory sessions lost across restarts, writable Operator permissions, and unpruned growth in telemetry/audit tables presented security and reliability gaps.
+
+### Decision
+1. **Out-of-Band Zero-Trust Onboarding**: Added `POST /api/pair` (5-minute TTL, 50-pending DoS cap, `409 Conflict` anti-hijack) paired with constant-time `X-Device-Token` verification, `X-Device-Origin` anti-spoofing, ±5-minute anti-replay validation, and `MONITOR_MQTT_STRICT` enforcement on `noxfort/telemetry/#`.
+2. **Persistent SHA-256 Sessions & Brute-Force Lockout**: Moved active sessions into the `sessions` table (`DBSessionStore`, storing only SHA-256 token hashes), added per-account/IP brute-force tracking (`LoginAttemptTracker`, HTTP `429`), rejected query-string `?token=` leaks, and enforced strictly read-only `OPERATOR` RBAC with content-negotiated `403` views (`forbidden.html`).
+3. **24/7 Storage Durability & Prometheus Instrumentation**: Enabled SQLite WAL mode (`PRAGMA journal_mode = WAL`), transactional cross-engine `MigrateData`, validated one-click backup restore (`PRAGMA quick_check` / `pg_restore`), automated 90-day retention pruning (`RetentionManager`), and native Prometheus counters/gauges in `internal/metrics`.
+
+---
+
+## 5. Roadmap & Future Research
+
+### 5.1 gRPC Expansion for Monitor Federation
 While MQTT and HTTP REST comfortably serve sensor telemetry, multi-server federation (active-passive clustering or HQ-to-branch hierarchies) will benefit from **gRPC / Protocol Buffers**:
 * Drastic reduction of network payload overhead over constrained satellite links.
 * Strictly typed, immutable schemas for audit log replication.
 
-### 4.2 Predictive Anomaly Detection
+### 5.2 Predictive Anomaly Detection
 Current alerts trigger via static rules and thresholds (e.g., `temperature > 80°C`). We are investigating lightweight time-series forecasting in Go (such as exponential moving averages and embedded ONNX runtimes) to identify failure trends before operational safety limits are breached.
 
 ---

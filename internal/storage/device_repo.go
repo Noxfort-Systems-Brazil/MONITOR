@@ -21,6 +21,7 @@
 package storage
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"fmt"
 	"sync"
@@ -179,7 +180,16 @@ func (r *DeviceRepository) GetByIdentifier(identifier string) (*domain.Device, e
 }
 
 // CreateOrUpdatePending stores a device in PENDING state with its secret API key and expiration TTL.
+// It rejects attempts to downgrade an already ACTIVE device so external pairing callers cannot hijack or DoS live agents.
 func (r *DeviceRepository) CreateOrUpdatePending(device *domain.Device) error {
+	existing, err := r.GetByIdentifier(device.Identifier)
+	if err != nil {
+		return err
+	}
+	if existing != nil && existing.Status == "ACTIVE" {
+		return domain.ErrDeviceAlreadyActive
+	}
+
 	db, driver := r.getDB()
 	if db == nil {
 		return fmt.Errorf("database not initialized")
@@ -208,8 +218,7 @@ func (r *DeviceRepository) CreateOrUpdatePending(device *domain.Device) error {
 		`
 	}
 
-	_, err := db.Exec(query, device.Name, device.Identifier, device.ApiKey, device.ExpiresAt)
-	if err != nil {
+	if _, err := db.Exec(query, device.Name, device.Identifier, device.ApiKey, device.ExpiresAt); err != nil {
 		return fmt.Errorf("failed to register pending device %s: %w", device.Identifier, err)
 	}
 	return nil
@@ -225,8 +234,8 @@ func (r *DeviceRepository) ActivateDevice(identifier string, token string) (bool
 		return false, nil
 	}
 
-	// Verify token match
-	if device.ApiKey != token {
+	// Verify token match in constant time
+	if device.ApiKey == "" || subtle.ConstantTimeCompare([]byte(device.ApiKey), []byte(token)) != 1 {
 		return false, nil
 	}
 
@@ -266,7 +275,7 @@ func (r *DeviceRepository) ActivateDevice(identifier string, token string) (bool
 	return false, nil
 }
 
-// ValidateToken verifies that a device exists, is enabled, is ACTIVE, and possesses the matching API key.
+// ValidateToken verifies that a device exists, is enabled, is ACTIVE, and possesses a non-empty matching API key.
 func (r *DeviceRepository) ValidateToken(identifier string, token string) (bool, error) {
 	device, err := r.GetByIdentifier(identifier)
 	if err != nil {
@@ -276,16 +285,11 @@ func (r *DeviceRepository) ValidateToken(identifier string, token string) (bool,
 		return false, nil
 	}
 
-	// If the device has no API key set (legacy dev environment), allow it
-	if device.ApiKey == "" {
-		return true, nil
+	if device.Status != "ACTIVE" || device.ApiKey == "" || token == "" {
+		return false, nil
 	}
 
-	if device.Status == "ACTIVE" && device.ApiKey == token {
-		return true, nil
-	}
-
-	return false, nil
+	return subtle.ConstantTimeCompare([]byte(device.ApiKey), []byte(token)) == 1, nil
 }
 
 // CleanupExpiredPending deletes any devices remaining in PENDING state after their TTL.
@@ -341,13 +345,13 @@ func (r *DeviceRepository) ForceUpdateLastSeen(identifier string, seenAt time.Ti
 	query := `
 	INSERT INTO devices (name, identifier, status, last_seen, enabled)
 	VALUES (?, ?, 'ACTIVE', ?, 1)
-	ON CONFLICT(identifier) DO UPDATE SET last_seen = excluded.last_seen, enabled = 1;
+	ON CONFLICT(identifier) DO UPDATE SET last_seen = excluded.last_seen;
 	`
 	if driver == "postgres" {
 		query = `
 		INSERT INTO devices (name, identifier, status, last_seen, enabled)
 		VALUES ($1, $2, 'ACTIVE', $3, TRUE)
-		ON CONFLICT(identifier) DO UPDATE SET last_seen = EXCLUDED.last_seen, enabled = TRUE;
+		ON CONFLICT(identifier) DO UPDATE SET last_seen = EXCLUDED.last_seen;
 		`
 	}
 
@@ -377,5 +381,98 @@ func (r *DeviceRepository) DeleteDevice(identifier string) error {
 	query := AdaptQuery(`DELETE FROM devices WHERE identifier = ?;`, driver)
 	_, err := db.Exec(query, identifier)
 	return err
+}
+
+// CreateManualDevice provisions a pre-approved ACTIVE device with the given API key.
+func (r *DeviceRepository) CreateManualDevice(name, identifier, apiKey string) (*domain.Device, error) {
+	if identifier == "" || apiKey == "" {
+		return nil, fmt.Errorf("identifier and apiKey are required")
+	}
+	if name == "" {
+		name = identifier
+	}
+
+	existing, err := r.GetByIdentifier(identifier)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("device '%s' is already registered", identifier)
+	}
+
+	db, driver := r.getDB()
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	query := AdaptQuery(`
+		INSERT INTO devices (name, identifier, api_key, status, expires_at, enabled)
+		VALUES (?, ?, ?, 'ACTIVE', NULL, ?);
+	`, driver)
+	if _, err := db.Exec(query, name, identifier, apiKey, true); err != nil {
+		return nil, fmt.Errorf("failed to create device '%s': %w", identifier, err)
+	}
+
+	return r.GetByIdentifier(identifier)
+}
+
+// UpdateDeviceName renames an existing device.
+func (r *DeviceRepository) UpdateDeviceName(identifier, name string) error {
+	if identifier == "" || name == "" {
+		return fmt.Errorf("identifier and name are required")
+	}
+	db, driver := r.getDB()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	query := AdaptQuery(`UPDATE devices SET name = ? WHERE identifier = ?;`, driver)
+	res, err := db.Exec(query, name, identifier)
+	if err != nil {
+		return fmt.Errorf("failed to update device '%s': %w", identifier, err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("device '%s' not found", identifier)
+	}
+	return nil
+}
+
+// SetDeviceEnabled toggles Maintenance Mode (paused vs active monitoring) for a device.
+func (r *DeviceRepository) SetDeviceEnabled(identifier string, enabled bool) error {
+	if identifier == "" {
+		return fmt.Errorf("identifier is required")
+	}
+	db, driver := r.getDB()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	query := AdaptQuery(`UPDATE devices SET enabled = ? WHERE identifier = ?;`, driver)
+	res, err := db.Exec(query, enabled, identifier)
+	if err != nil {
+		return fmt.Errorf("failed to set enabled=%v for '%s': %w", enabled, identifier, err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("device '%s' not found", identifier)
+	}
+	return nil
+}
+
+// RotateAPIKey assigns a new API key and guarantees status stays ACTIVE without expiring TTL.
+func (r *DeviceRepository) RotateAPIKey(identifier, newApiKey string) error {
+	if identifier == "" || newApiKey == "" {
+		return fmt.Errorf("identifier and newApiKey are required")
+	}
+	db, driver := r.getDB()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	query := AdaptQuery(`UPDATE devices SET api_key = ?, status = 'ACTIVE', expires_at = NULL WHERE identifier = ?;`, driver)
+	res, err := db.Exec(query, newApiKey, identifier)
+	if err != nil {
+		return fmt.Errorf("failed to rotate API key for '%s': %w", identifier, err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("device '%s' not found", identifier)
+	}
+	return nil
 }
 

@@ -1,102 +1,46 @@
-# 🔐 Segurança, Autenticação e Controle de Acesso (RBAC)
+# Noxfort Monitor — Arquitetura de Segurança
 
-Este documento detalha a arquitetura de segurança do **Noxfort Monitor™ v2.0**, incluindo autenticação, ciclo de vida de tokens de sessão, hash de senhas com sal criptográfico e Controle de Acesso Baseado em Papéis (RBAC).
-
-⬅️ [Central de Documentação](../README.md) | 🏛️ [Arquitetura](architecture.md) | 🔍 [Trilha de Auditoria](audit_trail.md) | 📡 [API](api_reference.md)
+O Noxfort Monitor aplica defesa em profundidade abrangendo controle de acesso, derivação de credenciais, persistência de sessões, proteção contra força bruta, pareamento Zero-Trust e canais de alerta.
 
 ---
 
-## 1. Arquitetura de Segurança e RBAC
+## 1. Controle de Acesso Baseado em Perfis (RBAC)
 
-O Noxfort Monitor implementa segregação rígida de privilégios:
+Dois perfis controlam o acesso na API HTTP e na interface desktop (Wails):
 
-* **`RoleAdmin` ("ADMIN")**: Privilégios totais de administração: cadastro de usuários, migração de bancos de dados, abertura de túnel reverso e configurações gerais do sistema.
-* **`RoleOperator` ("OPERATOR")**: Privilégios operacionais: visualização do painel de telemetria, listagem de equipamentos e histórico de alertas.
-* **Papéis de Roteamento de Notificações**:
-  * **`TECHNICIAN`**: Recebe exclusivamente incidentes da categoria `HARDWARE`.
-  * **`PROGRAMMER`**: Recebe exclusivamente incidentes da categoria `SOFTWARE`.
-  * **`ADMIN`**: Recebe todas as categorias de incidentes.
+* **`ADMIN`**: Controle total sobre dispositivos/chaves, gestão de usuários/perfis/desbloqueios, contatos, configurações do sistema/MQTT, túneis DuckDNS/Ngrok e migração/backup/restauração de banco de dados. Contas superuser e último administrador são protegidos contra exclusão (`DeleteUserByActor`).
+* **`OPERATOR` (Estritamente Somente Leitura)**: Acesso limitado à visualização (`GET` dashboard, `/audit`, `/api/audit/*`, `/remote`, `/server`, `/settings`), `/api/auth/logout` e autoatendimento `POST /api/users/password` (exige `current_password`). Bloqueado de `/users`, mutações em `/api/users`, `/api/settings/database/backup*` e qualquer alteração de estado:
+  * Requisições API/XHR (`/api/*`, `Accept: application/json`, `XMLHttpRequest`) recebem JSON `403 Forbidden`.
+  * Views HTML do desktop/navegador exibem a página `web/templates/forbidden.html`.
 
 ---
 
-## 2. Hash Criptográfico e Política de Senhas
+## 2. Hashing de Senhas e Complexidade
 
-### 2.1 Armazenamento Criptográfico e Sal Único
-As senhas são protegidas por derivação SHA-256 com sal criptográfico em `internal/security/hasher.go`:
-* Sal aleatório de 16 bytes gerado individualmente por usuário (`crypto/rand`).
-* Senhas e hashes são estritamente excluídos da serialização JSON (`json:"-"`).
-* Comparação em tempo constante para evitar ataques de temporização (*timing attacks*).
-
-### 2.2 Política Industrial de Complexidade de Senhas (`password_validator.go`)
-Para proteger sistemas críticos de automação contra ataques de força bruta, o validador [`internal/security/password_validator.go`](../../internal/security/password_validator.go) exige conformidade obrigatória via `ValidatePasswordComplexity()`:
-* **Comprimento Mínimo**: No mínimo 8 caracteres.
-* **Dígito Numérico**: Ao menos um número (`0-9`).
-* **Letra Maiúscula**: Ao menos uma letra maiúscula (`A-Z`).
-* **Letra Minúscula**: Ao menos uma letra minúscula (`a-z`).
-* **Caractere Especial**: Ao menos um caractere especial (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\§¬¢£`).
-
-Tentativas de cadastro ou criação de usuários sem esses critérios resultam em erro HTTP `400 Bad Request`.
-
-### 2.3 Medidor Dinâmico de Força de Senha (`password_meter.js`)
-As telas de login, primeiro acesso e gerenciamento de usuários incluem verificação em tempo real ([`web/static/js/password_meter.js`](../../web/static/js/password_meter.js)):
-* Avaliação de entropia e pontuação de 0 a 4 conforme a digitação.
-* Checklist interativo dos 5 requisitos de segurança com feedback visual imediato.
-* Bloqueio preventivo de envio de formulário caso a senha seja vulnerável.
+* **Derivação PBKDF2**: Senhas são processadas pelo `PBKDF2Hasher` via **PBKDF2 HMAC-SHA256** com **`100.000` iterações**, sal aleatório de **`16` bytes** e chave derivada de **`32` bytes**.
+* **Política de Complexidade**: `ValidatePasswordComplexity` valida comprimento mínimo e diversidade de caracteres no cadastro, troca de senha e inicialização de superusuário.
 
 ---
 
-## 3. Ciclo de Vida da Sessão e AuthMiddleware
+## 3. Proteção contra Força Bruta (`LoginAttemptTracker`)
 
-```mermaid
-sequenceDiagram
-    participant User as Operador / Navegador
-    participant MW as AuthMiddleware
-    participant SM as SessionManager
-    participant App as Handler Protegido
-
-    User->>MW: Requisição HTTP (Cookie: noxfort_session=XYZ)
-    MW->>SM: ValidateSession("XYZ")
-    alt Sessão Válida
-        SM-->>MW: Session(User, RoleAdmin)
-        MW->>App: Encaminha Requisição com Contexto do Usuário
-        App-->>User: 200 OK (Renderiza Tela)
-    else Sessão Inválida ou Expirada
-        MW-->>User: Redireciona 303 para /login (ou 401 Unauthorized para /api/*)
-    end
-```
-
-* **Armazenamento**: Mapa thread-safe em memória sincronizado por mutex.
-* **Renovação Deslizante**: Interações ativas renovam automaticamente a janela de validade de 24 horas.
-* **Intercepção Inteligente**: Requisições web sem sessão são redirecionadas com código HTTP `303 See Other`; chamadas para a API REST retornam JSON `401 Unauthorized`.
+* Falhas de login são contabilizadas por chave composta `username|ip` (IP resolvido por `ExtractClientIP`).
+* **Regra de Bloqueio**: **`5` tentativas inválidas** dentro de **`15` minutos** acionam bloqueio de **`5` minutos**, respondendo com HTTP **`429 Too Many Requests`** e registrando `AUTH_LOGIN_LOCKED`.
+* Administradores podem liberar bloqueios manualmente via `POST /api/users/unlock`.
 
 ---
 
-## 4. Hardening do Broker MQTT e Senhas PBKDF2
+## 4. Sessões Persistentes Hasheadas e Proxies Confiáveis
 
-* **Desativação de Acesso Anônimo**: [`mosquitto.conf`](../../mosquitto/config/mosquitto.conf) define `allow_anonymous false`.
-* **Criptografia Forte**: Credenciais geradas via `mosquitto_passwd` com hash PBKDF2 (SHA-512).
-* **Setup Automatizado**: Comando `make broker-auth` gera credenciais e sincroniza automaticamente no `.env`.
-* **Proteção Git**: Arquivos `passwd*` são ignorados no repositório.
-
----
-
-## 5. Validação de Segurança de Ambiente (`env_validator.go`)
-
-No boot do sistema, o validador inspeciona a integridade das configurações locais:
-* **Restrição Automática de Permissões (`0600`)**: Em ambientes Linux, restringe o arquivo `.env` para leitura exclusiva pelo proprietário caso esteja acessível publicamente.
-* **Detecção de Senhas Fracas**: Emite alerta crítico caso as credenciais padrão de superusuário (`admin` / `Admin@Noxfort2026!`) permaneçam ativas em produção.
-* **Checagem de Credenciais MQTT**: Alerta caso `MQTT_USER` ou `MQTT_PASSWORD` estejam ausentes antes de iniciar o broker.
+* **`DBSessionStore`**: Sessões são armazenadas na tabela `sessions`, guardando exclusivamente o hash **`SHA-256` (`token_hash`)** do token, com **TTL fixo de `24h`** e limpeza automática a cada hora. Ao implementar `ReloadableRepository`, sessões permanecem ativas após trocas ao vivo entre SQLite e PostgreSQL.
+* **Proibição de `?token=` na URL**: `ExtractSessionToken` lê apenas cookies HTTP-only e rejeita tokens na query string (`?token=`) para evitar vazamento em logs e histórico.
+* **`TRUSTED_PROXIES` e `MONITOR_USE_HTTPS`**: `ExtractClientIP` e `IsHTTPSRequest` só confiam nos cabeçalhos `X-Real-IP`, `X-Forwarded-For` e `X-Forwarded-Proto` (enviados pelo `caddy/Caddyfile`) quando originados de proxies em `TRUSTED_PROXIES`, ativando cookies `Secure` corretamente sem permitir falsificação de IP.
 
 ---
 
-## 6. Bootstrap Idempotente do Superusuário (`superuser.go`)
+## 5. Proteção de Borda, Redação de Segredos e SMTP
 
-Na inicialização, o sistema verifica as variáveis `MONITOR_ADMIN_USER` e `MONITOR_ADMIN_PASSWORD`:
-* Se nenhuma conta de administrador existir, uma conta `ADMIN` é provisionada automaticamente.
-* Caso credenciais customizadas sejam informadas em produção, a conta de teste padrão é purgada automaticamente para prevenir backdoors.
-
----
-
-## 7. Prevenção de Vazamento de Segredos no CI/CD
-
-O workflow automatizado do GitHub Actions ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)) audita todo commit para impedir o versionamento de arquivos `.env`, chaves privadas (`*.pem`, `*.key`) ou senhas do Mosquitto.
+* **Pareamento Zero-Trust**: `POST /api/pair` aceita pré-cadastro como `PENDING` (limite de 50 na fila, `409 Conflict` se já `ACTIVE`) retornando `202` sem credenciais; a chave `nox_live_` (TTL 5m) é copiada fora de banda em `/devices` e validada em tempo constante junto a `X-Device-Origin` e janela de replay `±300s`.
+* **MQTT Estrito**: `MONITOR_MQTT_STRICT` (padrão `true`) descarta publicações em `noxfort/telemetry/#` de dispositivos não registrados ou pausados.
+* **Mascaramento em HTML**: `/settings`, `/remote` e `/devices` ocultam segredos ativos (`ApiKey`, `duckdns_token`) no HTML renderizado; salvamentos parciais preservam tokens não alterados.
+* **Endurecimento SMTP**: `EmailChannel` suporta TLS implícito na porta `465` (`TLS 1.2+`) e sanitiza cabeçalhos (`sanitizeEmailHeader`, removendo CRLF) contra injeção SMTP.

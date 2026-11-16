@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"noxfort-monitor-server/internal/domain"
 	"noxfort-monitor-server/internal/storage"
@@ -84,15 +83,8 @@ func (h *DatabaseHandler) HandleProvisionUser(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if h.auditRepo != nil {
-		details := fmt.Sprintf("Usuário provisionado: %s, Banco: %s, Schema: %s", req.NewUser, req.DBName, req.Schema)
-		_ = h.auditRepo.SaveSecurityAuditLog(&domain.SecurityAuditLog{
-			Username:  "admin",
-			Action:    "POSTGRES_USER_PROVISIONED",
-			Details:   details,
-			CreatedAt: time.Now(),
-		})
-	}
+	details := fmt.Sprintf("Usuário provisionado: %s, Banco: %s, Schema: %s", req.NewUser, req.DBName, req.Schema)
+	logSecurityAuditEvent(h.auditRepo, r, "POSTGRES_USER_PROVISIONED", details)
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,

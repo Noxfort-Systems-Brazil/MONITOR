@@ -1,35 +1,37 @@
 # 🧪 Pruebas y Aseguramiento de Calidad (QA)
 
-Este documento especifica los flujos de validación de **Noxfort Monitor™ v2.0**, abarcando pruebas unitarias automáticas con mocks y verificación manual E2E mediante MQTT y HTTP REST.
+Este documento especifica los flujos de validación de **Noxfort Monitor™ v2.0**, abarcando las suites automatizadas (Go + Vitest), verificación E2E en MQTT (`noxfort/telemetry/#`) y HTTP Zero-Trust (`/api/pair` + `/api/telemetry`), y el modo de demostración automatizada.
 
 ⬅️ [Hub Central](../README.md) | 🏛️ [Arquitectura](architecture.md) | 📡 [API](api_reference.md)
 
 ---
 
-## 1. Suite de Pruebas Automatizadas
+## 1. Suites de Pruebas Automatizadas
 
-Ejecución de la suite completa de pruebas:
 ```bash
+# Ejecuta backend Go (go test ./... -v) + frontend Vitest (npm test)
 make test
-# Equivalente a: go test ./... -v
+
+# Solo pruebas de frontend (Vitest: 4 archivos, 26 pruebas; reemplaza antiguo pytest)
+make test-frontend
+
+# Análisis estático (go vet)
+make lint
 ```
 
-### Arquitectura de Mocks en Memoria
-La lógica de negocio en `internal/monitor` e `internal/security` no requiere bases de datos en disco gracias a interfaces simuladas:
-* `MockDeviceRepository`: Simula la consulta y actualización de `LastSeen`.
-* `MockTelemetryRepository`: Verifica la persistencia de incidentes.
-* `MockAlertDispatcher`: Valida que las alertas lleguen al enrutador.
-* `MockNotificationChannel`: Comprueba el envío sin realizar llamadas reales a SMTP o Telegram.
+* **Backend Go**: Cubre seguridad (`lockout_test.go`, hashing PBKDF2, complejidad), almacenamiento (`session_repo_test.go`, `retention_test.go`, migración transacional, backup/restore), HTTP RBAC/ingestión, MQTT estricto, decodificador de protocolo y alertas (`alerts_test.go`).
+* **Mocks en Memoria**: `MockDeviceRepository`, `MockTelemetryRepository`, `MockAlertDispatcher` y `MockNotificationChannel` permiten validar reglas sin dependencias externas.
 
 ---
 
 ## 2. Verificación Manual de Extremo a Extremo (E2E)
 
 ### 2.1 Ingestión mediante MQTT (`mosquitto_pub`)
+Con `MONITOR_MQTT_STRICT=true` (por defecto), registre primero `bomba-01` como `ACTIVE` en `/devices` (o ajuste `MONITOR_MQTT_STRICT=false` en entorno de pruebas local) antes de publicar bajo `noxfort/telemetry/#`:
 
 ```bash
 # Latido de Presencia (Keep-Alive)
-mosquitto_pub -t "noxfort/devices/bomba-01/telemetry" -m '{
+mosquitto_pub -t "noxfort/telemetry/bomba-01" -m '{
   "category": "HARDWARE",
   "origin": "bomba-01",
   "level": "INFO",
@@ -37,8 +39,8 @@ mosquitto_pub -t "noxfort/devices/bomba-01/telemetry" -m '{
   "occurred_at": "2026-09-27T18:00:00Z"
 }'
 
-# Alarma Crítica (Dispara Alertas Inmediatas)
-mosquitto_pub -t "noxfort/devices/bomba-01/telemetry" -m '{
+# Alarma Crítica (Dispara Alertas y Registro vinculado en alert_dispatch_logs)
+mosquitto_pub -t "noxfort/telemetry/bomba-01" -m '{
   "category": "HARDWARE",
   "origin": "bomba-01",
   "level": "CRITICAL",
@@ -47,17 +49,30 @@ mosquitto_pub -t "noxfort/devices/bomba-01/telemetry" -m '{
 }'
 ```
 
-### 2.2 Ingestión mediante HTTP REST (`cURL`)
+### 2.2 Ingestión Zero-Trust mediante HTTP REST (`cURL`)
 
 ```bash
-curl -X POST http://localhost:22100/api/telemetry \
+# 1. Pre-registro Zero-Trust (responde 202 Accepted sin devolver clave)
+curl -i -X POST http://localhost:22100/api/pair \
   -H "Content-Type: application/json" \
+  -d '{"origin":"carina-core","name":"Carina Core"}'
+
+# 2. Aprobar en /devices y copiar el token temporal nox_live_ (TTL 5m), luego enviar telemetría:
+curl -i -X POST http://localhost:22100/api/telemetry \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_TU_TOKEN_COPIADO" \
+  -H "X-Device-Origin: carina-core" \
   -d '{
     "category": "SOFTWARE",
     "origin": "carina-core",
     "level": "WARNING",
     "message": "Latencia de inferencia 4.2ms (objetivo: 3.5ms)",
-    "occurred_at": "2026-09-27T18:10:00Z"
+    "occurred_at": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"
   }'
 ```
-*Respuesta esperada*: Código HTTP `200 OK` con cuerpo `{"status":"received"}`.
+*Respuesta esperada*: `202 Accepted`, actualización inmediata en `GET /api/dashboard/summary` y contadores en `GET /metrics`.
+
+---
+
+## 3. Modo Demo Automatizado
+Ejecute `make record-demo` (`scripts/demo/record_presentation.cjs` y `mock_telemetry.cjs`) contra `--demo` (`RunDesktopServer()`) para validar flujos E2E en navegador.

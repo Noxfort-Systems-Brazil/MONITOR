@@ -1,109 +1,53 @@
-# 🏛️ Noxfort Monitor™: Blueprint e Arquitetura do Sistema
+# Noxfort Monitor — Arquitetura do Sistema
 
-Este documento especifica a arquitetura interna do **Noxfort Monitor™ v2.0**, detalhando a Arquitetura Orientada a Eventos (EDA), o modelo de concorrência com Goroutines, os limites de camadas SOLID e a montagem na raiz de composição.
-
-⬅️ [Central de Documentação](../README.md) | 📡 [Referência de API](api_reference.md) | 🗄️ [Banco de Dados](database.md) | 🔐 [Segurança](security.md) | 🧪 [Testes](testing.md)
+O Noxfort Monitor adota uma arquitetura modular limpa em Go, unificando ingestão multiprotocolo, máquina de estados de dispositivos, despacho resiliente de alertas e persistência SQL de motor duplo em binários desktop (Wails) ou servidor headless.
 
 ---
 
-## 1. Filosofia Arquitetural
-
-O Noxfort Monitor opera sob uma estrita **Arquitetura Orientada a Eventos (EDA)** acoplada a princípios **SOLID** e **Injeção de Dependências (DI)** montada no ponto de composição em `cmd/server/main.go`. O sistema elimina estados globais mutáveis e pacotes com rotinas de inicialização ocultas.
+## 1. Topologia de Alto Nível
 
 ```mermaid
-graph TD
-    subgraph "Mundo Externo & Nós de Borda"
-        LocalDevice[Dispositivo Local / LAN]
-        RemoteDevice[Agente Remoto / WAN (Carina, Synapse)]
-        Operator[Navegador / Operador Humano]
-    end
-
-    subgraph "Camada de Transporte & Rede"
-        MQTT[Broker MQTT :1883]
-        Ngrok[Túnel Ngrok / WAN HTTPS]
-        HTTP[Servidor HTTP :22100]
-        AuthMW[AuthMiddleware - RBAC]
-    end
-
-    subgraph "Camada de Lógica & Segurança"
-        StateManager[Gerenciador de Estado]
-        Watchdog[Motor Watchdog]
-        Alerts[Serviço de Roteamento de Alertas]
-        SecManager[Gerenciador de Segurança]
-        TunnelMgr[Gerenciador de Túnel]
-    end
-
-    subgraph "Persistência Dual-Engine (internal/storage)"
-        DBMgr[DBManager Central]
-        AuditRepo[AuditRepository]
-        PG[(PostgreSQL Industrial)]
-        SQLite[(SQLite Puro sem CGO)]
-    end
-
-    subgraph "Canais Externos de Notificação"
-        Telegram[Telegram Bot API (MarkdownV2)]
-        Email[Servidor SMTP (E-mail)]
-    end
-
-    LocalDevice -- "Publicação MQTT" --> MQTT
-    RemoteDevice -- "HTTPS POST /api/telemetry" --> Ngrok
-    Ngrok --> HTTP
-    Operator -- "HTTP GET / POST" --> HTTP
-
-    MQTT -- "Decodifica Payload" --> StateManager
-    HTTP --> AuthMW
-    AuthMW --> StateManager
-    AuthMW --> SecManager
-
-    StateManager -- "1. Persiste Incidente" --> DBMgr
-    StateManager -- "2. Despacha Alerta" --> Alerts
-    Watchdog -- "Verifica Batimentos" --> DBMgr
-    Watchdog -- "Sintetiza Queda/Recuperação" --> Alerts
-    Watchdog -- "Registra Transição" --> AuditRepo
-
-    Alerts -- "Goroutines Concorrentes" --> Telegram
-    Alerts -- "Goroutines Concorrentes" --> Email
-    Alerts -- "Registra SLA de Despacho" --> AuditRepo
-
-    SecManager -- "Audita Logins" --> AuditRepo
-    DBMgr --> PG
-    DBMgr --> SQLite
+flowchart LR
+    Edge["Sensores de Borda (MQTT / HTTP)"] -->|noxfort/telemetry/#| MQTT["Cliente MQTT"]
+    Edge -->|POST /api/pair e /api/telemetry| Proxy["Caddy / Proxy Reverso"]
+    Browser["UI Admin e Operador"] -->|HTTPS + Cookie| Proxy
+    Proxy -->|X-Forwarded-For / Proto| HTTP["Roteador HTTP e Middleware RBAC"]
+    Desktop["Wails Desktop / --demo"] --> HTTP
+    HTTP --> Auth["PBKDF2 + DBSessionStore + Lockout"]
+    HTTP --> State["StateManager e Engine (30s / 5m)"]
+    MQTT --> State
+    State --> Writer["BufferedTelemetryWriter"]
+    State --> Alerts["AlertService (Retry + Shutdown)"]
+    Writer --> DBM["DBManager (SQLite WAL / PostgreSQL)"]
+    Retention["RetentionManager (90d)"] --> DBM
+    Backup["BackupManager (VACUUM INTO / pg_dump)"] --> DBM
+    HTTP --> Metrics["internal/metrics (/metrics)"]
 ```
 
 ---
 
-## 2. Camadas de Subsistemas Desacopladas
+## 2. Modos de Execução (`cmd/server/main.go`)
 
-1. **Camada de Transporte (`internal/transport`)**: Terminação de protocolos de rede (broker MQTT via Paho e servidor HTTP REST com `AuthMiddleware`).
-2. **Camada de Lógica de Monitoramento (`internal/monitor`)**: Máquina de estados reativa (`StateManager`), detector de falhas silenciosas (`Engine`/Watchdog) e roteador de alertas (`AlertService`).
-3. **Camada de Segurança (`internal/security`)**: Gerenciamento de sessões, hash de senhas com sal, validação de tokens e controle de acesso baseado em papéis (RBAC).
-4. **Camada de Acesso Remoto (`internal/tunnel`)**: Túnel reverso seguro via Ngrok para ingestão de nós de borda em redes WAN.
-5. **Camada de Domínio (`internal/domain`)**: Entidades e contratos de interface puros sem dependências externas.
-6. **Camada de Persistência (`internal/storage`)**: Gerenciador dinâmico dual-engine (`DBManager`), implementações PostgreSQL e SQLite, adaptador de dialeto e migrador de dados.
-7. **Camada de Interface Desktop (`internal/desktop`, `internal/tray`)**: Runtime nativo em Wails v2 com WebKitGTK, trava de instância única via socket Unix e ciclo de vida da bandeja do sistema.
+A raiz de composição (`cmd/server/main.go`) carrega variáveis via `LoadDotEnv()` (o antigo `configs/config.yaml` foi removido) e inicia um dos três modos:
+
+* **Modo Desktop (Padrão)**: Executa o servidor embutido com janela nativa Wails e bandeja do sistema.
+* **Servidor Headless (`--headless` / `--server-only`)**: Executa apenas os serviços HTTP e MQTT em segundo plano, com desligamento gracioso (`AlertService.Shutdown(shutdownCtx)`).
+* **Modo Demonstração (`--demo`)**: Invoca `RunDesktopServer()` diretamente sem interface gráfica Wails para apresentações automatizadas (`make record-demo`).
 
 ---
 
-## 3. Modelo de Concorrência e Goroutines
+## 3. Responsabilidades dos Subsistemas
 
-```mermaid
-graph TD
-    Main[Thread Principal do SO / Goroutine Primária]
-    
-    Main -->|Modo Desktop Padrão| WailsEventLoop[Loop de Eventos Desktop Wails v2]
-    WailsEventLoop --> Systray[Callbacks GTK da Bandeja]
-    WailsEventLoop --> WebKit[Janela WebKitGTK]
-    
-    Main -->|Modo --headless| SigChan[Loop de Sinais do SO (SIGINT/SIGTERM)]
-
-    Main -.->|go func| HTTPServer[Servidor HTTP ListenAndServe :22100]
-    Main -.->|go func| MQTTListener[Loop de Pacotes MQTT Paho]
-    Main -.->|go func| WatchdogEngine[Loop do Ticker - Intervalo 30s]
-    Main -.->|go func| AlertWorkers[Workers Concorrentes de Email/Telegram]
-```
-
-* **Thread Principal**: No modo desktop, executa `desktopApp.Run()` (Wails v2), exigido porque o toolkit GTK/WebKit do Linux deve deter a thread primária do SO. No modo `--headless`, bloqueia aguardando sinais de finalização do SO (`syscall.SIGTERM`, `os.Interrupt`).
-* **Servidor HTTP**: Executado em goroutine independente com timeouts de 15 segundos na porta `22100`.
-* **Listener MQTT**: O cliente Paho gerencia sockets TCP em goroutines dedicadas de leitura/escrita na porta `1883`.
-* **Loop do Watchdog**: Opera em canal `time.Ticker` desacoplado avaliando ausência de batimento (> 5 minutos).
-* **Encerramento Gracioso**: Coordenado por rotina `sync.Once` thread-safe que encerra sockets de rede, fecha túneis e libera pools de banco de forma atômica.
+1. **Ingresso e Segurança (`internal/transport/http`, `internal/security`)**:
+   * **Sessões e Bloqueio**: `DBSessionStore` valida hashes `SHA-256` na tabela `sessions` (TTL de 24h, `?token=` rejeitado), enquanto `LoginAttemptTracker` aplica bloqueio após 5 falhas em 15m (`429`).
+   * **RBAC Consciente de Proxy**: `ExtractClientIP` e `IsHTTPSRequest` respeitam `TRUSTED_PROXIES` + `MONITOR_USE_HTTPS`. O perfil `OPERATOR` é estritamente somente leitura (`403` JSON em APIs; `web/templates/forbidden.html` na UI), com permissão apenas para autoatendimento `POST /api/users/password`.
+2. **Ingestão de Borda (`internal/transport/mqtt`, `telemetry_handler.go`)**:
+   * **MQTT**: Assina `noxfort/telemetry/#`, aplica `MONITOR_MQTT_STRICT` (padrão `true`), tenta reconectar a cada 5s na inicialização e suporta `Reconnect(brokerURL)` ao salvar `/settings`.
+   * **HTTP Zero-Trust**: `POST /api/pair` enfileira até 50 dispositivos `PENDING` (`202` sem retornar segredo; `409` se já `ACTIVE`); `POST /api/telemetry` exige `X-Device-Token` / `Bearer`, `X-Device-Origin` e janela `±300s` em `occurred_at`.
+3. **Motor de Monitoramento, Buffer e Alertas (`internal/monitor`, `internal/storage`)**:
+   * `BufferedTelemetryWriter` grava telemetria em lote assíncrono, oferecendo também `SaveEventReturningID` síncrono em transições que disparam alertas (`TriggerAlertWithTelemetryID`).
+   * `StateManager` respeita dispositivos `PAUSED` (Modo Manutenção); `Engine` roda a cada `30s` (limiar offline de `5m` + `CleanupExpiredPending()`).
+   * `AlertService` envia notificações Telegram, E-mail (TLS implícito na porta 465 + sanitização CRLF) e Webhooks com retentativas (`500ms`, `1500ms`) e drenagem no encerramento.
+4. **Persistência, Backups, Retenção e Métricas (`internal/storage`, `internal/metrics`)**:
+   * `DBManager` alterna SQLite (`WAL`) e PostgreSQL via `SetDB(db *sql.DB, driver string)` nos 7 `ReloadableRepository`, usando `MigrateData` em transação única nas 9 tabelas.
+   * `BackupManager` agenda backups quentes (`MONITOR_BACKUP_INTERVAL_HOURS=24`, mantendo 7) e restauração (`PRAGMA quick_check` / `pg_restore`); `RetentionManager` limpa dados antigos (`MONITOR_RETENTION_DAYS=90`); `/metrics` expõe contadores Prometheus.

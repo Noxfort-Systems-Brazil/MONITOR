@@ -19,6 +19,16 @@
 // Date: October 2026
 
 class DatabaseApiClient {
+    async _parseResponseData(res) {
+        try {
+            return await res.json();
+        } catch (_) {
+            const text = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+            const msg = text || `HTTP ${res.status || 500}`;
+            return { success: false, error: msg, message: msg };
+        }
+    }
+
     async getStatus() {
         const res = await fetch('/api/settings/database/status');
         if (!res.ok) {
@@ -33,7 +43,7 @@ class DatabaseApiClient {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        const data = await this._parseResponseData(res);
         return { ok: res.ok, data };
     }
 
@@ -43,7 +53,7 @@ class DatabaseApiClient {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        const data = await this._parseResponseData(res);
         return { ok: res.ok, data };
     }
 
@@ -53,7 +63,34 @@ class DatabaseApiClient {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        const data = await this._parseResponseData(res);
+        return { ok: res.ok, data };
+    }
+
+    async listBackups() {
+        const res = await fetch('/api/settings/database/backups');
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: Failed to list backups`);
+        }
+        return await res.json();
+    }
+
+    async createBackup() {
+        const res = await fetch('/api/settings/database/backup', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' }
+        });
+        const data = await this._parseResponseData(res);
+        return { ok: res.ok, data };
+    }
+
+    async restoreBackup(filename) {
+        const res = await fetch('/api/settings/database/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ filename })
+        });
+        const data = await this._parseResponseData(res);
         return { ok: res.ok, data };
     }
 }

@@ -41,11 +41,17 @@ type SettingsStore interface {
 type TunnelHandler struct {
 	settingsRepo  SettingsStore
 	tunnelService tunnel.Service
+	auditRepo     domain.AuditRepository
 }
 
 // NewTunnelHandler creates a new TunnelHandler instance with injected dependencies (DIP).
 func NewTunnelHandler(settingsRepo SettingsStore, ts tunnel.Service) *TunnelHandler {
 	return &TunnelHandler{settingsRepo: settingsRepo, tunnelService: ts}
+}
+
+// SetAuditRepository attaches an AuditRepository for recording tunnel credential/state changes.
+func (h *TunnelHandler) SetAuditRepository(repo domain.AuditRepository) {
+	h.auditRepo = repo
 }
 
 // ServePage renders the dedicated Remote Access HTML page.
@@ -65,17 +71,29 @@ func (h *TunnelHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	viewSettings := domain.Settings{}
+	if settings != nil {
+		viewSettings = *settings
+	}
+	hasDuckDNSToken := viewSettings.DuckDNSToken != ""
+	// Never embed plaintext credentials into rendered HTML inputs
+	viewSettings.DuckDNSToken = ""
+	viewSettings.SMTPPass = ""
+	viewSettings.TelegramBotToken = ""
+	viewSettings.NgrokAuthToken = ""
+
 	data := map[string]interface{}{
-		"Title":       "Remote Access",
-		"Settings":    settings,
-		"Status":      status,
-		"LocalIP":     localIP,
-		"LocalPort":   localPort,
-		"LocalURL":    "http://" + localIP + ":" + localPort + "/api/telemetry",
-		"BinaryFound": h.tunnelService.IsBinaryAvailable(),
+		"Title":           "Remote Access",
+		"Settings":        &viewSettings,
+		"HasDuckDNSToken": hasDuckDNSToken,
+		"Status":          status,
+		"LocalIP":         localIP,
+		"LocalPort":       localPort,
+		"LocalURL":        "http://" + localIP + ":" + localPort + "/api/telemetry",
+		"BinaryFound":     h.tunnelService.IsBinaryAvailable(),
 	}
 
-	if err := RenderPage(w, "web/templates/remote.html", data); err != nil {
+	if err := RenderPageWithRequest(w, r, "web/templates/remote.html", data); err != nil {
 		log.Printf("[REMOTE] Template rendering error: %v", err)
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		return
@@ -103,10 +121,17 @@ func (h *TunnelHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
 	autoStart := r.FormValue("duckdns_enabled") == "on" || r.FormValue("duckdns_enabled") == "true" || r.FormValue("auto_start") == "true"
 
 	err := h.mutateSettings(func(s *domain.Settings) {
-		s.DuckDNSToken, s.DuckDNSDomain = token, domainName
+		if token != "" {
+			s.DuckDNSToken = token
+		} else if domainName == "" {
+			s.DuckDNSToken = ""
+		} else {
+			token = s.DuckDNSToken
+		}
+		s.DuckDNSDomain = domainName
 		if autoStart {
 			s.DuckDNSEnabled = true
-		} else if token == "" || domainName == "" {
+		} else if s.DuckDNSToken == "" || domainName == "" {
 			s.DuckDNSEnabled = false
 		}
 		s.NgrokAuthToken, s.NgrokDomain, s.NgrokEnabled = "", "", false
@@ -116,11 +141,13 @@ func (h *TunnelHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if autoStart && token != "" {
-		_ = h.tunnelService.Start(token, domainName)
-	} else if token == "" {
+	if autoStart && sTokenOrSaved(token, h.settingsRepo) != "" {
+		_ = h.tunnelService.Start(sTokenOrSaved(token, h.settingsRepo), domainName)
+	} else if domainName == "" {
 		_ = h.tunnelService.Stop()
 	}
+
+	logSecurityAuditEvent(h.auditRepo, r, "TUNNEL_CONFIG_SAVED", "DuckDNS configurado para subdomínio '"+domainName+"'")
 
 	if strings.Contains(r.Header.Get("Accept"), "json") || r.Header.Get("X-Requested-With") != "" {
 		h.respondResult(w, http.StatusOK, true, "Configurações salvas com sucesso.")
@@ -172,6 +199,7 @@ func (h *TunnelHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		s.DuckDNSDomain = domainName
 		s.DuckDNSEnabled = true
 	})
+	logSecurityAuditEvent(h.auditRepo, r, "TUNNEL_STARTED", "DuckDNS iniciado para subdomínio '"+domainName+"'")
 	h.respondResult(w, http.StatusOK, true, "Serviço DuckDNS iniciado com sucesso.")
 }
 
@@ -182,6 +210,7 @@ func (h *TunnelHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = h.tunnelService.Stop()
 	_ = h.mutateSettings(func(s *domain.Settings) { s.DuckDNSEnabled = false })
+	logSecurityAuditEvent(h.auditRepo, r, "TUNNEL_STOPPED", "Serviço DuckDNS parado manualmente")
 	h.respondResult(w, http.StatusOK, true, "Serviço DuckDNS desconectado/pausado com sucesso.")
 }
 
@@ -197,6 +226,7 @@ func (h *TunnelHandler) HandleDisconnect(w http.ResponseWriter, r *http.Request)
 		h.respondResult(w, http.StatusInternalServerError, false, "Falha ao remover credenciais: "+err.Error())
 		return
 	}
+	logSecurityAuditEvent(h.auditRepo, r, "TUNNEL_DISCONNECTED", "Credenciais DuckDNS removidas")
 	h.respondResult(w, http.StatusOK, true, "Credenciais do DuckDNS removidas e serviço desconectado com sucesso.")
 }
 
@@ -256,6 +286,16 @@ func (h *TunnelHandler) respondJSON(w http.ResponseWriter, code int, data interf
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+func sTokenOrSaved(token string, repo SettingsStore) string {
+	if token != "" || repo == nil {
+		return token
+	}
+	if s, err := repo.GetSettings(); err == nil && s != nil {
+		return s.DuckDNSToken
+	}
+	return ""
 }
 
 func (h *TunnelHandler) respondResult(w http.ResponseWriter, code int, ok bool, msg string) {

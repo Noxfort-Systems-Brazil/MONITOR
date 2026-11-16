@@ -4,7 +4,7 @@
 
 # 🖥️ Desktop Application & Operations: Noxfort Monitor™
 
-This document details the native desktop architecture of **Noxfort Monitor™ v2.0** built with **Wails v2**, its integration with **WebKitGTK**, the **Single-Instance** lock mechanism, the **System Tray (Systray)** lifecycle, **Headless** server mode, and the **Debian package (`.deb`)** generation pipeline.
+This document details the native desktop architecture of **Noxfort Monitor™ v2.0** built with **Wails v2**, its integration with **WebKitGTK**, the **Single-Instance** lock mechanism, the **System Tray (Systray)** lifecycle, **Headless** server mode (`--headless`), **Demo** presentation mode (`--demo`), and the **Debian package (`.deb`)** generation pipeline.
 
 ---
 
@@ -46,6 +46,8 @@ graph TD
 * **Default Dimensions**: 1280x800 px (minimum: 1024x600 px).
 * **GPU Policy**: `linux.WebviewGpuPolicyOnDemand` for optimal energy efficiency on industrial workstations.
 * **Minimize on Close**: `HideWindowOnClose: true`. Clicking the window close button ("X") does not terminate the backend server; it hides the GUI to the system tray.
+* **Desktop-Friendly RBAC Views**: `AuthMiddleware` renders [`web/templates/forbidden.html`](../web/templates/forbidden.html) inside the Monitor HTML shell whenever an `OPERATOR` navigates to an admin-only view or action in WebKitGTK, preserving in-app navigation without dead-end plain-text errors.
+* **Live Dashboard & Self-Service Controls**: The Overview dashboard (`/`) polls `GET /api/dashboard/summary` every 10 seconds (with a Live/Paused toggle), and the navbar provides a self-service password change modal (`POST /api/users/password`) for any authenticated user.
 
 ---
 
@@ -72,11 +74,11 @@ The [`internal/tray/tray.go`](../internal/tray/tray.go) package integrates direc
 * **Embedded Asset**: The official Noxfort icon is compiled into the Go binary via `//go:embed icon.png`.
 * **Context Menu**:
   * **Open Dashboard**: Restores the graphical window and brings it to the top of the desktop workspace.
-  * **Shutdown / Quit**: Triggers a clean graceful shutdown, stopping the Watchdog Engine, disconnecting from the MQTT broker, terminating the active WAN service (DuckDNS / Ngrok), and releasing database connections.
+  * **Shutdown / Quit**: Triggers a clean graceful shutdown: cancels background maintenance loops (`DBSessionStore` cleanup, `RetentionManager`, `BackupManager` scheduler), closes the single-instance lock, stops the tunnel service, stops the HTTP server, halts the Watchdog Engine, disconnects MQTT, flushes `BufferedTelemetryWriter`, waits for in-flight alert deliveries via `AlertService.Shutdown()`, and closes the active database handle.
 
 ---
 
-## 4. Headless Server Mode (Daemon)
+## 4. Headless (`--headless`) and Demo (`--demo`) Modes
 
 On production servers, Docker containers, or cloud environments without an active display server (no X11 or Wayland), attempting to launch WebKit windows will result in an initialization error (`cannot open display`).
 
@@ -96,10 +98,19 @@ make run-headless
 ### What Headless Mode Does:
 1. **Disables GUI Initialization**: Bypasses Wails v2 and WebKitGTK window creation entirely.
 2. **Disables IPC Activation Listener**: Skips GUI window restore socket listeners while maintaining system stability.
-3. **Runs External Ingestion Listener**: Starts `ExternalIngestionHandler` on port `22100` for IoT sensor telemetry (`POST /api/telemetry`) and observability probes (`/healthz`, `/api/health`, `/metrics`).
-4. **Autonomous Operation**: Operates MQTT client subscriptions, silent failure detection (Watchdog Engine), DuckDNS dynamic DNS updates, and automated email/Telegram alert dispatching.
+3. **Runs External Ingestion Listener**: Starts `ExternalIngestionHandler` on port `22100` for Zero-Trust pairing (`POST /api/pair`), IoT sensor telemetry (`POST /api/telemetry`), and observability probes (`/healthz`, `/api/health`, `/metrics`).
+4. **Autonomous Operation**: Operates MQTT client subscriptions (`noxfort/telemetry/#` with `MONITOR_MQTT_STRICT`), silent failure detection (Watchdog Engine), DuckDNS dynamic DNS updates, automated email/Telegram alert dispatching, scheduled backups, and 90-day retention pruning.
 5. **Security Isolation**: Direct browser access to dashboard HTML pages is blocked with HTTP 403 Forbidden. Headless nodes operate purely as telemetry collectors and incident alert dispatchers.
 6. **Graceful Shutdown**: Listens for standard OS termination signals (`SIGINT`, `SIGTERM`) to release locks and cleanly terminate.
+
+### Demo & Automated Presentation Mode (`--demo`)
+For automated UI recordings and walkthrough demonstrations ([`scripts/demo/record_presentation.cjs`](../scripts/demo/record_presentation.cjs)), launch with `--demo`:
+```bash
+go run -tags "production,webkit2_41" ./cmd/server --demo
+# Or run the full automated Playwright presentation video pipeline:
+make record-demo
+```
+In `--demo` mode, the server runs `RunDesktopServer()` (`DesktopHandler`) directly over HTTP on `:22100` without opening a Wails desktop window, blocking on `SIGINT`/`SIGTERM`. Do not expose `--demo` on untrusted public networks.
 
 ---
 

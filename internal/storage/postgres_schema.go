@@ -139,6 +139,15 @@ func InitPostgresSchema(db *sql.DB, schemaName string) error {
 			created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 		);`,
 
+		// Persistent Web/Desktop Sessions
+		`CREATE TABLE IF NOT EXISTS sessions (
+			token_hash VARCHAR(64) PRIMARY KEY,
+			username VARCHAR(128) NOT NULL,
+			role VARCHAR(32) NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+		);`,
+
 		// 3. AUDIT TABLES
 		// Security & Access Control Audit Logs (Mirrors Synapse security_audit_logs)
 		`CREATE TABLE IF NOT EXISTS security_audit_logs (
@@ -183,6 +192,8 @@ func InitPostgresSchema(db *sql.DB, schemaName string) error {
 		`CREATE INDEX IF NOT EXISTS idx_alert_dispatch_time ON alert_dispatch_logs (dispatched_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_alert_dispatch_telemetry ON alert_dispatch_logs (telemetry_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_device_trans_time ON device_state_transitions (device_identifier, transition_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions (username);`,
 	}
 
 	for _, stmt := range statements {

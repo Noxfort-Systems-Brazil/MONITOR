@@ -58,9 +58,14 @@ func (s *Server) Handler() http.Handler {
 
 	// 4. Protected Application Routes
 	mux.HandleFunc("/", s.dashboardHandler.ServePage)
+	mux.HandleFunc("/api/dashboard/summary", s.dashboardHandler.HandleSummary)
 
 	// System Management
 	mux.HandleFunc("/devices", s.deviceHandler.ServePage)
+	mux.HandleFunc("/devices/create", s.deviceHandler.HandleCreate)
+	mux.HandleFunc("/devices/update", s.deviceHandler.HandleUpdate)
+	mux.HandleFunc("/devices/toggle", s.deviceHandler.HandleToggle)
+	mux.HandleFunc("/devices/rotate-key", s.deviceHandler.HandleRotateKey)
 	mux.HandleFunc("/devices/delete", s.deviceHandler.HandleDelete)
 
 	// Response Team (Contacts)
@@ -93,6 +98,8 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/api/settings/database/provision-user", s.databaseHandler.HandleProvisionUser)
 		mux.HandleFunc("/api/settings/database/backup", s.databaseHandler.HandleBackup)
 		mux.HandleFunc("/api/settings/database/backups", s.databaseHandler.HandleListBackups)
+		mux.HandleFunc("/api/settings/database/backups/download", s.databaseHandler.HandleDownloadBackup)
+		mux.HandleFunc("/api/settings/database/restore", s.databaseHandler.HandleRestoreBackup)
 	}
 
 	// Audit Trail
@@ -107,6 +114,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/users", s.userHandler.ServePage)
 	mux.HandleFunc("/api/users", s.userHandler.HandleList)
 	mux.HandleFunc("/api/users/create", s.userHandler.HandleCreateUser)
+	mux.HandleFunc("/api/users/password", s.userHandler.HandleChangePassword)
+	mux.HandleFunc("/api/users/role", s.userHandler.HandleUpdateRole)
+	mux.HandleFunc("/api/users/unlock", s.userHandler.HandleUnlockUser)
 	mux.HandleFunc("/api/users/delete", s.userHandler.HandleDelete)
 
 	// 5. Open External Links in Default Browser

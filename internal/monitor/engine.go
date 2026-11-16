@@ -230,14 +230,29 @@ func (e *Engine) triggerEvent(identifier string, level domain.EventLevel, msg st
 	}
 
 	// 1. Persist to DB if event recorder is provided
+	var telIDPtr *int64
 	if e.events != nil {
-		if err := e.events.SaveEvent(identifier, event); err != nil {
+		if idRec, ok := e.events.(interface {
+			SaveEventReturningID(string, *domain.IncomingEvent) (int64, error)
+		}); ok {
+			if telID, err := idRec.SaveEventReturningID(identifier, event); err != nil {
+				log.Printf("[ENGINE] Failed to save watchdog event: %v", err)
+			} else if telID > 0 {
+				telIDPtr = &telID
+			}
+		} else if err := e.events.SaveEvent(identifier, event); err != nil {
 			log.Printf("[ENGINE] Failed to save watchdog event: %v", err)
 		}
 	}
 
 	// 2. Alert Human if dispatcher is provided
 	if e.alerts != nil {
-		e.alerts.TriggerAlert(identifier, event)
+		if withID, ok := e.alerts.(interface {
+			TriggerAlertWithTelemetryID(string, *domain.IncomingEvent, *int64)
+		}); ok {
+			withID.TriggerAlertWithTelemetryID(identifier, event, telIDPtr)
+		} else {
+			e.alerts.TriggerAlert(identifier, event)
+		}
 	}
 }

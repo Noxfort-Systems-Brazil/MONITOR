@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Input elements & saved credentials cache
     const tokenInput = document.getElementById('duckdns_token');
     const domainInput = document.getElementById('duckdns_domain');
+    let hasSavedToken = Boolean(tokenInput && tokenInput.dataset.configured === 'true');
     let savedTokenValue = tokenInput ? tokenInput.value.trim() : '';
     let savedDomainValue = domainInput ? domainInput.value.trim() : '';
 
@@ -53,7 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function checkStatus() {
         const data = await api.getStatus();
         if (data) {
-            ui.updateTunnelUI(data, savedTokenValue, savedDomainValue);
+            ui.updateTunnelUI(data, savedTokenValue || (hasSavedToken ? '__configured__' : ''), savedDomainValue);
             return data;
         }
         return null;
@@ -79,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const tokenVal = tokenInput ? tokenInput.value.trim() : '';
             const domVal = domainInput ? domainInput.value.trim() : '';
-            if (!tokenVal || !domVal) {
+            if ((!tokenVal && !hasSavedToken) || !domVal) {
                 ui.showFeedback('⚠️ Por favor, preencha o <strong>Token</strong> e o <strong>Subdomínio</strong> DuckDNS.', 'warning');
                 return;
             }
@@ -92,7 +93,16 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const { ok, data } = await api.saveConfig(tokenVal, domVal);
                 if (ok) {
-                    savedTokenValue = tokenVal;
+                    if (tokenVal) {
+                        hasSavedToken = true;
+                        savedTokenValue = tokenVal;
+                        if (tokenInput) {
+                            tokenInput.dataset.configured = 'true';
+                            tokenInput.value = '';
+                            tokenInput.removeAttribute('required');
+                            tokenInput.placeholder = '•••••••• (Token configurado — deixe em branco para manter)';
+                        }
+                    }
                     savedDomainValue = domVal;
                     ui.showFeedback('✅ <strong>Credenciais salvas com sucesso!</strong> O serviço permanece desconectado até você clicar em "Conectar DuckDNS".', 'success');
                     if (btnDisconnectTunnel) btnDisconnectTunnel.classList.remove('d-none');
@@ -116,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnConnectTunnel.addEventListener('click', async () => {
             const tokenVal = tokenInput ? tokenInput.value.trim() : '';
             const domVal = domainInput ? domainInput.value.trim() : '';
-            if (!tokenVal || !domVal) {
+            if ((!tokenVal && !hasSavedToken) || !domVal) {
                 ui.showFeedback('⚠️ Por favor, preencha o <strong>Token</strong> e o <strong>Subdomínio</strong> DuckDNS para conectar.', 'warning');
                 return;
             }
@@ -128,9 +138,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { ok, data } = await api.startTunnel(tokenVal, domVal);
                 if (ok) {
                     ui.showFeedback('Iniciando serviço DuckDNS...', 'info');
-                    savedTokenValue = tokenVal;
+                    if (tokenVal) {
+                        hasSavedToken = true;
+                        savedTokenValue = tokenVal;
+                        if (tokenInput) {
+                            tokenInput.dataset.configured = 'true';
+                            tokenInput.value = '';
+                            tokenInput.removeAttribute('required');
+                        }
+                    }
                     savedDomainValue = domVal;
-                    ui.updateTunnelUI({ state: 'CONNECTING', domain: savedDomainValue, telemetry_url: '' }, savedTokenValue, savedDomainValue);
+                    ui.updateTunnelUI({ state: 'CONNECTING', domain: savedDomainValue, telemetry_url: '' }, savedTokenValue || '__configured__', savedDomainValue);
                     pollStatusUntilOnline();
                 } else {
                     ui.showFeedback(`Falha ao conectar: ${data?.error || 'Erro desconhecido'}`, 'danger');
@@ -177,7 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnTestTunnel.addEventListener('click', async () => {
             const tokenVal = tokenInput ? tokenInput.value.trim() : '';
             const domVal = domainInput ? domainInput.value.trim() : '';
-            if (!tokenVal || !domVal) {
+            if ((!tokenVal && !hasSavedToken) || !domVal) {
                 ui.showFeedback('⚠️ Preencha o <strong>Token</strong> e o <strong>Subdomínio</strong> DuckDNS para realizar o teste de conexão.', 'warning');
                 return;
             }
@@ -217,8 +235,14 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const { ok, data } = await api.disconnect();
                 if (ok) {
-                    if (tokenInput) tokenInput.value = '';
+                    if (tokenInput) {
+                        tokenInput.value = '';
+                        tokenInput.dataset.configured = 'false';
+                        tokenInput.setAttribute('required', 'required');
+                        tokenInput.placeholder = 'Ex: a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+                    }
                     if (domainInput) domainInput.value = '';
+                    hasSavedToken = false;
                     savedTokenValue = '';
                     savedDomainValue = '';
                     ui.showFeedback('Credenciais removidas e serviço DuckDNS desativado com sucesso.', 'info');

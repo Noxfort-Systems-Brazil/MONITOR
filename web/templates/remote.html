@@ -117,6 +117,7 @@ Date: October 2026
 
                 {{/* DuckDNS Configuration */}}
                 <div class="border-top border-secondary pt-3">
+                    {{ if .IsAdmin }}
                     <form action="/api/tunnel/save" method="POST" id="tunnelConfigForm">
                         {{/* DuckDNS Token */}}
                         <div class="mb-3">
@@ -127,8 +128,9 @@ Date: October 2026
                             <div class="input-group">
                                 <input type="password" class="form-control bg-black text-white border-secondary font-monospace"
                                        id="duckdns_token" name="duckdns_token"
-                                       placeholder="Ex: a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                                       value="{{ .Settings.DuckDNSToken }}" required>
+                                       data-configured="{{ if .HasDuckDNSToken }}true{{ else }}false{{ end }}"
+                                       placeholder="{{ if .HasDuckDNSToken }}•••••••• (Token configurado — deixe em branco para manter){{ else }}Ex: a1b2c3d4-e5f6-7890-abcd-ef1234567890{{ end }}"
+                                       value="" {{ if not .HasDuckDNSToken }}required{{ end }}>
                                 <button class="btn btn-outline-secondary" type="button" id="btn-toggle-token" title="Mostrar/Ocultar Token">
                                     <i class="fa-solid fa-eye" id="icon-toggle-token"></i>
                                 </button>
@@ -186,13 +188,19 @@ Date: October 2026
 
                             {{/* Remove Action */}}
                             <div class="text-center mt-2">
-                                <button type="button" id="btn-disconnect-tunnel" class="btn btn-link text-muted text-decoration-none btn-sm {{ if not .Settings.DuckDNSToken }}d-none{{ end }}">
+                                <button type="button" id="btn-disconnect-tunnel" class="btn btn-link text-muted text-decoration-none btn-sm {{ if not .HasDuckDNSToken }}d-none{{ end }}">
                                     <i class="fa-solid fa-trash-can me-1"></i>
                                     <span data-i18n="remote_clear_credentials_btn">Limpar Credenciais Salvas</span>
                                 </button>
                             </div>
                         </div>
                     </form>
+                    {{ else }}
+                    <div class="alert alert-info bg-black border-info text-light small mb-0 d-flex align-items-center" role="alert">
+                        <i class="fa-solid fa-eye text-info me-2"></i>
+                        <span data-i18n="rbac_operator_readonly_notice">Modo somente leitura (Operador): apenas contas com perfil Administrador podem cadastrar, editar ou excluir recursos.</span>
+                    </div>
+                    {{ end }}
                 </div>
             </div>
 

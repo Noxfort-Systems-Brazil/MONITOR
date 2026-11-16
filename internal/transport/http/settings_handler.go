@@ -37,8 +37,10 @@ type ConnectionTester interface {
 
 // SettingsHandler manages the configuration page and actions.
 type SettingsHandler struct {
-	repo   domain.SettingsRepository
-	tester ConnectionTester
+	repo           domain.SettingsRepository
+	tester         ConnectionTester
+	auditRepo      domain.AuditRepository
+	onMQTTChanged  func(string)
 }
 
 // NewSettingsHandler creates a handler for system settings with an injected ConnectionTester.
@@ -49,30 +51,85 @@ func NewSettingsHandler(r domain.SettingsRepository, t ConnectionTester) *Settin
 	}
 }
 
-// parseSettingsForm extracts, sanitizes, and binds form parameters into a domain.Settings instance.
-func parseSettingsForm(r *http.Request) *domain.Settings {
-	port, _ := strconv.Atoi(r.FormValue("smtp_port"))
-	smtpUser := strings.TrimSpace(r.FormValue("smtp_user"))
-
-	adminEmail := strings.TrimSpace(r.FormValue("admin_email"))
-	if adminEmail == "" {
-		adminEmail = smtpUser
-	}
-
-	return &domain.Settings{
-		SMTPHost:         strings.TrimSpace(r.FormValue("smtp_host")),
-		SMTPPort:         port,
-		SMTPUser:         smtpUser,
-		SMTPPass:         r.FormValue("smtp_pass"),
-		SMTPFrom:         strings.TrimSpace(r.FormValue("smtp_from")),
-		AdminEmail:       adminEmail,
-		MqttAddress:      strings.TrimSpace(r.FormValue("mqtt_address")),
-		Enabled:          true,
-		TelegramBotToken: strings.TrimSpace(r.FormValue("telegram_bot_token")),
-	}
+// SetAuditRepository attaches an AuditRepository for recording settings updates.
+func (h *SettingsHandler) SetAuditRepository(repo domain.AuditRepository) {
+	h.auditRepo = repo
 }
 
-// ServePage renders the settings form with current values.
+// SetOnMQTTConfigChanged registers a live reconnect callback invoked when mqtt_address changes.
+func (h *SettingsHandler) SetOnMQTTConfigChanged(cb func(string)) {
+	h.onMQTTChanged = cb
+}
+
+// mergeSettingsFromRequest selectively updates configuration sections without wiping unrelated fields or stored secrets.
+func mergeSettingsFromRequest(r *http.Request, existing *domain.Settings) *domain.Settings {
+	merged := &domain.Settings{
+		ID:          1,
+		SMTPPort:    587,
+		MqttAddress: "tcp://127.0.0.1:1883",
+		Enabled:     true,
+	}
+	if existing != nil {
+		copyVal := *existing
+		merged = &copyVal
+		merged.ID = 1
+	}
+
+	section := strings.TrimSpace(r.FormValue("form_section"))
+
+	if section == "" || section == "smtp" {
+		port, err := strconv.Atoi(r.FormValue("smtp_port"))
+		if err == nil && port > 0 {
+			merged.SMTPPort = port
+		}
+		smtpUser := strings.TrimSpace(r.FormValue("smtp_user"))
+		adminEmail := strings.TrimSpace(r.FormValue("admin_email"))
+		if adminEmail == "" {
+			adminEmail = smtpUser
+		}
+		smtpPass := r.FormValue("smtp_pass")
+		// Preserve stored SMTP password if blank and the SMTP username did not change
+		if smtpPass == "" && existing != nil && existing.SMTPPass != "" && (smtpUser == "" || smtpUser == existing.SMTPUser) {
+			smtpPass = existing.SMTPPass
+		}
+
+		merged.SMTPHost = strings.TrimSpace(r.FormValue("smtp_host"))
+		merged.SMTPUser = smtpUser
+		merged.SMTPPass = smtpPass
+		merged.SMTPFrom = strings.TrimSpace(r.FormValue("smtp_from"))
+		merged.AdminEmail = adminEmail
+		merged.Enabled = true
+	}
+
+	if section == "" || section == "telegram" {
+		if r.FormValue("clear_telegram") == "true" {
+			merged.TelegramBotToken = ""
+		} else if tok := strings.TrimSpace(r.FormValue("telegram_bot_token")); tok != "" {
+			merged.TelegramBotToken = tok
+		}
+	}
+
+	if section == "" || section == "mqtt" {
+		if mqttAddr := strings.TrimSpace(r.FormValue("mqtt_address")); mqttAddr != "" {
+			merged.MqttAddress = mqttAddr
+		}
+	}
+
+	return merged
+}
+
+func maskTokenPreview(tok string) string {
+	tok = strings.TrimSpace(tok)
+	if tok == "" {
+		return ""
+	}
+	if len(tok) <= 4 {
+		return "••••"
+	}
+	return tok[:4] + "•••••••••"
+}
+
+// ServePage renders the settings form without exposing plaintext credentials in the HTML DOM.
 func (h *SettingsHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.repo.GetSettings()
 	if err != nil {
@@ -81,12 +138,28 @@ func (h *SettingsHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	viewSettings := domain.Settings{}
+	if settings != nil {
+		viewSettings = *settings
+	}
+	hasSMTPPass := viewSettings.SMTPPass != ""
+	hasTelegramToken := viewSettings.TelegramBotToken != ""
+	telegramHint := maskTokenPreview(viewSettings.TelegramBotToken)
+	// Redact plaintext secrets before HTML template rendering
+	viewSettings.SMTPPass = ""
+	viewSettings.TelegramBotToken = ""
+	viewSettings.DuckDNSToken = ""
+	viewSettings.NgrokAuthToken = ""
+
 	data := map[string]interface{}{
-		"Title":    "System Settings",
-		"Settings": settings,
+		"Title":             "System Settings",
+		"Settings":          &viewSettings,
+		"HasSMTPPass":       hasSMTPPass,
+		"HasTelegramToken":  hasTelegramToken,
+		"TelegramTokenHint": telegramHint,
 	}
 
-	if err := RenderTemplate(w, data,
+	if err := RenderTemplateWithRequest(w, r, data,
 		"web/templates/layout.html",
 		"web/templates/settings.html",
 		"web/templates/partials/settings_smtp.html",
@@ -105,17 +178,8 @@ func (h *SettingsHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings := parseSettingsForm(r)
-
-	// Preserve existing DuckDNS and remote access configurations so saving general settings does not wipe them
-	if existing, err := h.repo.GetSettings(); err == nil && existing != nil {
-		settings.DuckDNSToken = existing.DuckDNSToken
-		settings.DuckDNSDomain = existing.DuckDNSDomain
-		settings.DuckDNSEnabled = existing.DuckDNSEnabled
-		settings.NgrokAuthToken = existing.NgrokAuthToken
-		settings.NgrokDomain = existing.NgrokDomain
-		settings.NgrokEnabled = existing.NgrokEnabled
-	}
+	existing, _ := h.repo.GetSettings()
+	settings := mergeSettingsFromRequest(r, existing)
 
 	// Persist to database
 	if err := h.repo.SaveSettings(settings); err != nil {
@@ -125,6 +189,16 @@ func (h *SettingsHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("[SETTINGS] Configuration updated successfully.")
+	section := strings.TrimSpace(r.FormValue("form_section"))
+	if section == "" {
+		section = "general"
+	}
+	if h.onMQTTChanged != nil && (section == "mqtt" || section == "general") && settings.MqttAddress != "" {
+		if existing == nil || existing.MqttAddress != settings.MqttAddress {
+			h.onMQTTChanged(settings.MqttAddress)
+		}
+	}
+	logSecurityAuditEvent(h.auditRepo, r, "SETTINGS_UPDATED", "Configurações atualizadas (seção: "+section+")")
 	Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 

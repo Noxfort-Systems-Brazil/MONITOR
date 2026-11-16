@@ -1,64 +1,74 @@
 # 🗄️ Persistance et Architecture Double-Moteur
 
-Ce document détaille la couche de persistance double-moteur de **Noxfort Monitor™ v2.0**, couvrant la prise en charge de PostgreSQL et SQLite, le rechargement à chaud en direct (`DBManager`), la migration automatique des données et l'adaptation des requêtes SQL.
+Ce document détaille la couche de persistance double-moteur de **Noxfort Monitor™ v2.0** : coexistence PostgreSQL et SQLite en mode WAL, basculement à chaud (`DBManager`), migration transactionnelle sur 9 tables, sauvegardes/restauration vérifiées et rétention automatique.
 
 ⬅️ [Hub Central](../README.md) | 🏛️ [Architecture](architecture.md) | 📡 [API](api_reference.md) | 🔐 [Sécurité](security.md)
 
 ---
 
-## 1. Coexistence Double-Moteur
+## 1. Coexistence Double-Moteur et Mode WAL
 
-Noxfort Monitor prend en charge à la fois les déploiements autonomes légers et les grappes de serveurs hautement disponibles :
+Les schémas SQLite et PostgreSQL maintiennent une parité exacte sur **9 tables et 12 index** :
 
-| Dimension | SQLite (Pur en Go) | PostgreSQL |
+| Dimension | SQLite (Pur en Go, mode WAL) | PostgreSQL |
 |---|---|---|
 | **Pilote Go** | `modernc.org/sqlite` (sans CGO) | `github.com/lib/pq` |
-| **Cas d'Usage** | Postes de travail locaux, passerelles de bordure | Serveurs industriels, haute concurrence |
+| **Optimisations** | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000` | Schéma dédié (`schema_monitor`) |
+| **Cas d'Usage** | Postes locaux, passerelles de bordure | Serveurs industriels haute concurrence |
 | **Emplacement** | `~/Documentos/Monitor/monitor_logs.db` | Serveur TCP (port `5432`) |
-| **Isolation** | Base de données locale monofichier | Schéma dédié (`schema_monitor`) |
-| **Dépendances** | Aucune (intégré au binaire Go) | Serveur PostgreSQL 12+ en réseau |
+| **Dépendances** | Aucune (embarqué dans le binaire Go) | PostgreSQL 12+ en réseau |
 
 ---
 
 ## 2. Rechargement Dynamique à Chaud (`DBManager`)
 
-Le composant `DBManager` pilote l'alternance de base de données à l'exécution sans redémarrage du processus ni rupture de session :
-
 ```mermaid
 graph TD
-    UI[Interface Web / Desktop] -->|Sauvegarder Configuration| DBHandler[DatabaseHandler]
+    UI[Interface Web / Desktop] -->|Sauvegarder / Restaurer| DBHandler[DatabaseHandler]
     DBHandler -->|Tester / Migrer / Basculer| DBManager[DBManager Central]
-    
-    subgraph "Dépôts Rechargeables"
+
+    subgraph "7 Dépôts Rechargeables"
         DeviceRepo[DeviceRepository]
         ContactRepo[ContactRepository]
         SettingsRepo[SettingsRepository]
         TelemetryRepo[TelemetryRepository]
         UserRepo[UserRepository]
         AuditRepo[AuditRepository]
+        SessionStore[DBSessionStore]
     end
-    
-    DBManager -->|SetDB / Remplacement Atomique| DeviceRepo
-    DBManager -->|SetDB / Remplacement Atomique| ContactRepo
-    DBManager -->|SetDB / Remplacement Atomique| SettingsRepo
-    DBManager -->|SetDB / Remplacement Atomique| TelemetryRepo
-    DBManager -->|SetDB / Remplacement Atomique| UserRepo
-    DBManager -->|SetDB / Remplacement Atomique| AuditRepo
+
+    DBManager -->|"SetDB(db, driver)"| DeviceRepo
+    DBManager -->|"SetDB(db, driver)"| ContactRepo
+    DBManager -->|"SetDB(db, driver)"| SettingsRepo
+    DBManager -->|"SetDB(db, driver)"| TelemetryRepo
+    DBManager -->|"SetDB(db, driver)"| UserRepo
+    DBManager -->|"SetDB(db, driver)"| AuditRepo
+    DBManager -->|"SetDB(db, driver)"| SessionStore
 ```
 
-Tous les dépôts implémentent l'interface `ReloadableRepository` :
+Chaque dépôt implémente l'interface `ReloadableRepository` :
+
 ```go
 type ReloadableRepository interface {
-    SetDB(db *sql.DB)
+    SetDB(db *sql.DB, driver string)
 }
 ```
 
 ---
 
-## 3. Migration Hétérogène Automatique (`MigrateData`)
+## 3. Migration Transactionnelle Unique (`MigrateData`)
 
-Lors du basculement entre SQLite et PostgreSQL, la procédure `MigrateData()` garantit l'intégrité intégrale :
-1. Ouvre des connexions simultanées vers la base source et la base cible.
-2. Extrait et transfère l'intégralité des entités : équipements (`devices`), contacts (`contacts`), paramètres globaux (`settings`), utilisateurs (`users`), journaux télémétriques (`telemetry`), audits de sécurité (`security_audit_logs`), historiques d'alertes (`alert_dispatch_logs`) et transitions d'état (`device_state_transitions`).
-3. Exécute les opérations d'insertion/mise à jour via `storage.AdaptQuery()` pour adapter les particularités syntaxiques (`ON CONFLICT (id) DO UPDATE`).
-4. Reconnecte l'ensemble des dépôts à la base cible et sauvegarde la configuration sur disque.
+Lors d'un basculement SQLite $\leftrightarrow$ PostgreSQL :
+1. `Migrator.MigrateData` transfère l'ensemble des **9 tables** (`devices` incluant `api_key`, `status`, `expires_at`, `telemetry` avec `device_id`, `settings`, `contacts`, `users`, `sessions`, `security_audit_logs`, `alert_dispatch_logs`, `device_state_transitions`) dans une **transaction SQL unique**.
+2. Les requêtes sont normalisées avec `storage.AdaptQuery()`.
+3. En cas d'erreur sur n'importe quelle table, la transaction est annulée et `DBManager.Switch` avorte sans laisser d'état partiel.
+
+---
+
+## 4. Sauvegardes à Chaud, Restauration et Rétention
+
+* **Sauvegardes (`BackupManager`)** : Produit des snapshots non bloquants (`VACUUM INTO` pour SQLite, `pg_dump -F c` pour PostgreSQL). `BackupManager.StartScheduledBackups` s'exécute selon `MONITOR_BACKUP_INTERVAL_HOURS` (défaut `24h`, conservation des `7` plus récents).
+* **Téléchargement & Restauration** :
+  * `GET /api/settings/database/backups/download` applique `ResolveBackupPath` contre le *path traversal*.
+  * `POST /api/settings/database/restore` vérifie l'intégrité SQLite via `PRAGMA quick_check` avant `RestoreSQLiteFile`, ou invoque `pg_restore`.
+* **Rétention (`RetentionManager`)** : Purge toutes les **`24` heures** les enregistrements antérieurs à `MONITOR_RETENTION_DAYS` (défaut **`90` jours**) dans `telemetry`, `alert_dispatch_logs`, `security_audit_logs` et `device_state_transitions`.

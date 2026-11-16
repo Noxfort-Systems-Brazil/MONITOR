@@ -20,7 +20,13 @@
 
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrDeviceAlreadyActive indicates a pairing attempt was rejected because the device is already ACTIVE.
+var ErrDeviceAlreadyActive = errors.New("device is already ACTIVE; cancel or rotate key instead")
 
 // Device represents a monitored system/service (e.g. "synapse", "carina").
 // It maps the 'origin' from the incoming JSON to a tracked state.
@@ -78,5 +84,17 @@ type DeviceRepository interface {
 	// DeleteDevice removes a system from monitoring.
 	// We use the identifier (string) as the key for deletion.
 	DeleteDevice(identifier string) error
+
+	// CreateManualDevice provisions an ACTIVE device manually with an explicit name and API key.
+	CreateManualDevice(name, identifier, apiKey string) (*Device, error)
+
+	// UpdateDeviceName renames an existing device by identifier.
+	UpdateDeviceName(identifier, name string) error
+
+	// SetDeviceEnabled pauses or resumes monitoring/alerts for a device (Maintenance Mode).
+	SetDeviceEnabled(identifier string, enabled bool) error
+
+	// RotateAPIKey replaces the device's API key while preserving ACTIVE status without TTL auto-deletion.
+	RotateAPIKey(identifier, newApiKey string) error
 }
 

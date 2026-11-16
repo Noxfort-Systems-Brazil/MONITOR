@@ -56,6 +56,24 @@ func (m *mockUserRepo) Create(user *domain.User) error {
 	return nil
 }
 
+func (m *mockUserRepo) UpdatePasswordHash(username, passwordHash string) error {
+	u, ok := m.users[username]
+	if !ok {
+		return errors.New("user not found")
+	}
+	u.PasswordHash = passwordHash
+	return nil
+}
+
+func (m *mockUserRepo) UpdateRole(username, role string) error {
+	u, ok := m.users[username]
+	if !ok {
+		return errors.New("user not found")
+	}
+	u.Role = role
+	return nil
+}
+
 func (m *mockUserRepo) Delete(id int64) error {
 	for k, u := range m.users {
 		if u.ID == id {

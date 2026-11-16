@@ -64,17 +64,43 @@ func (r *TelemetryRepository) getDB() (*sql.DB, string) {
 
 // SaveEvent persists an incident into the database.
 func (r *TelemetryRepository) SaveEvent(identifier string, event *domain.IncomingEvent) error {
+	_, err := r.SaveEventReturningID(identifier, event)
+	return err
+}
+
+// SaveEventReturningID persists an incident and returns its generated primary key ID.
+func (r *TelemetryRepository) SaveEventReturningID(identifier string, event *domain.IncomingEvent) (int64, error) {
 	db, driver := r.getDB()
 	if db == nil {
-		return fmt.Errorf("database not initialized")
+		return 0, fmt.Errorf("database not initialized")
 	}
 
-	query := AdaptQuery(`
+	if driver == "postgres" {
+		query := `
+			INSERT INTO telemetry (category, device_id, origin, level, message, occurred_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id;
+		`
+		var id int64
+		err := db.QueryRow(query,
+			event.Category,
+			identifier,
+			event.Origin,
+			event.Level,
+			event.Message,
+			event.OccurredAt,
+		).Scan(&id)
+		if err != nil {
+			return 0, fmt.Errorf("failed to insert telemetry event: %w", err)
+		}
+		return id, nil
+	}
+
+	query := `
 		INSERT INTO telemetry (category, device_id, origin, level, message, occurred_at)
 		VALUES (?, ?, ?, ?, ?, ?);
-	`, driver)
-
-	_, err := db.Exec(query,
+	`
+	res, err := db.Exec(query,
 		event.Category,
 		identifier,
 		event.Origin,
@@ -82,12 +108,11 @@ func (r *TelemetryRepository) SaveEvent(identifier string, event *domain.Incomin
 		event.Message,
 		event.OccurredAt,
 	)
-
 	if err != nil {
-		return fmt.Errorf("failed to insert telemetry event: %w", err)
+		return 0, fmt.Errorf("failed to insert telemetry event: %w", err)
 	}
-
-	return nil
+	id, _ := res.LastInsertId()
+	return id, nil
 }
 
 // SaveEventsBatch inserts multiple telemetry events in a single SQL operation.

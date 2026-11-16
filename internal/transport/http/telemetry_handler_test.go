@@ -295,5 +295,22 @@ func TestTelemetryHandler_DeviceAuthenticationLifecycle(t *testing.T) {
 	if recUnreg.Code != http.StatusForbidden {
 		t.Errorf("Expected 403 Forbidden for unknown device, got %d", recUnreg.Code)
 	}
+
+	// 9. Re-pairing an already ACTIVE device via /api/pair must return 409 Conflict (anti-hijack)
+	rePairReq := httptest.NewRequest(http.MethodPost, "/api/pair", strings.NewReader(`{"origin":"synapse-01","name":"Attacker Hijack"}`))
+	rePairRec := httptest.NewRecorder()
+	handler.HandlePair(rePairRec, rePairReq)
+	if rePairRec.Code != http.StatusConflict {
+		t.Errorf("Expected 409 Conflict when attempting /api/pair for an ACTIVE device, got %d", rePairRec.Code)
+	}
+
+	// Original ACTIVE key must still work uninterrupted
+	reqStillValid := httptest.NewRequest(http.MethodPost, "/api/telemetry", bytes.NewReader(pBytes))
+	reqStillValid.Header.Set("X-Device-Token", apiKey)
+	recStillValid := httptest.NewRecorder()
+	handler.HandleIngest(recStillValid, reqStillValid)
+	if recStillValid.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK with original key after rejected hijack /api/pair, got %d", recStillValid.Code)
+	}
 }
 

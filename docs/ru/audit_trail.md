@@ -1,6 +1,6 @@
 # 🔍 Аудиторский след и наблюдаемость
 
-Данный документ описывает подсистему аудита и соответствия требованиям **Noxfort Monitor™ v2.0**, включая регистрацию действий безопасности, контроль SLA доставки тревог и фиксацию времени простоя оборудования.
+Данный документ описывает подсистему аудита **Noxfort Monitor™ v2.0**: журналирование безопасности, доставку оповещений со связью с телеметрией и историю переходов состояний, доступные пользователям `Operator+` через `/audit` и `/api/audit/*`.
 
 ⬅️ [Главный Хаб](../README.md) | 🏛️ [Архитектура](architecture.md) | 🔐 [Безопасность](security.md)
 
@@ -8,14 +8,12 @@
 
 ## 1. Архитектура тройного аудита
 
-Noxfort Monitor разделяет записи аудита на три независимых неизменяемых потока:
-
 ```mermaid
 graph TD
     subgraph "Источники событий"
         Auth[SecurityManager / AuthMiddleware]
-        Alerts[AlertService / Диспетчер]
-        Watchdog[Engine / Watchdog]
+        Alerts[AlertService / Повторы и Shutdown]
+        Watchdog[StateManager / Engine]
     end
 
     subgraph "Уровень аудита"
@@ -24,13 +22,13 @@ graph TD
         TransLog[3. DeviceStateTransition]
     end
 
-    subgraph "Таблицы БД"
-        DB[(PostgreSQL / SQLite)]
+    subgraph "Ретеншн 90д (RetentionManager)"
+        DB[(PostgreSQL / SQLite WAL)]
     end
 
-    Auth -->|Вход / Ошибки / Изменение настроек| SecLog
-    Alerts -->|E-mail / Telegram / SLA доставки| AlertLog
-    Watchdog -->|Сбой / Восстановление / Простой| TransLog
+    Auth -->|Вход / Блокировка 429 / RBAC| SecLog
+    Alerts -->|Email TLS 465 / Telegram / Webhook| AlertLog
+    Watchdog -->|Сбой / Восстановление / Длительность| TransLog
 
     SecLog --> DB
     AlertLog --> DB
@@ -39,30 +37,38 @@ graph TD
 
 ---
 
-## 2. Модели и спецификация полей
+## 2. Модели и точная спецификация полей (`internal/domain/audit.go`)
 
-### 2.1 `SecurityAuditLog`
-Фиксирует попытки авторизации, смену паролей и административные действия:
-* `id` (*int64*): Уникальный последовательный номер.
-* `action` (*string*): `LOGIN_SUCCESS`, `LOGIN_FAILED`, `CONFIG_UPDATE`, `USER_CREATE`.
-* `username` (*string*): Имя пользователя, выполнившего действие.
-* `ip_address` (*string*): IP-адрес клиента.
-* `user_agent` (*string*): Идентификатор браузера или клиента.
-* `created_at` (*timestamp*): Время события в формате UTC.
+### 2.1 `SecurityAuditLog` (`security_audit_logs`)
+* `id` (*int64*): Уникальный первичный ключ.
+* `created_at` (*timestamp*): Время события UTC.
+* `username` (*string*): Инициатор или целевой пользователь.
+* `action` (*string*): Идентификатор (`AUTH_LOGIN_SUCCESS`, `AUTH_LOGIN_FAILED`, `AUTH_LOGIN_LOCKED`, `USER_CREATE`, `USER_PASSWORD_CHANGED`, `USER_ROLE_UPDATED`, `USER_UNLOCKED`, `USER_DELETE`, `DEVICE_*`, `CONTACT_*`, `SETTINGS_UPDATED`, `TUNNEL_*`, `DATABASE_*`, `POSTGRES_USER_PROVISIONED`).
+* `details` (*string*): Контекст и результат операции.
+* `ip_address` (*string*): Реальный IP-адрес клиента через `ExtractClientIP` и `TRUSTED_PROXIES`.
 
-### 2.2 `AlertDispatchLog`
-Обеспечивает подтверждение доставки сообщений для контроля SLA:
-* `incident_id` (*int64*): Ссылка на породивший инцидент телеметрии.
-* `contact_id` (*int64*): Идентификатор получателя.
-* `channel` (*string*): `EMAIL` или `TELEGRAM`.
-* `status` (*string*): `SENT` или `FAILED`.
-* `error_message` (*string*): Описание ошибки при сетевом сбое.
+### 2.2 `AlertDispatchLog` (`alert_dispatch_logs`)
+Фиксирует каждую попытку доставки в `AlertService` (повторы `500ms`, `1500ms`, сброс при `Shutdown`):
+* `id` (*int64*): Уникальный ключ.
+* `telemetry_id` (*int64*): Прямая ссылка на `telemetry.id`, полученная через `SaveEventReturningID`.
+* `channel` (*string*): `telegram`, `email` или `webhook`.
+* `recipient` (*string*): Адресат уведомления.
+* `role` (*string*): Уведомляемая роль.
+* `status` (*string*): Статус доставки.
+* `error_reason` (*string*): Текст ошибки при сбое.
 * `dispatched_at` (*timestamp*): Время попытки отправки.
 
-### 2.3 `DeviceStateTransition`
-Отслеживает доступность оборудования и фиксирует общее время простоя:
-* `device_id` (*int64*): Идентификатор контролируемого узла.
-* `from_state` (*string*): `ONLINE` / `OFFLINE`.
-* `to_state` (*string*): `OFFLINE` / `ONLINE`.
-* `transitioned_at` (*timestamp*): Время фиксации изменения статуса.
-* `downtime_seconds` (*int64*): Суммарное время недоступности в секундах.
+### 2.3 `DeviceStateTransition` (`device_state_transitions`)
+Фиксирует переходы, определяемые каждые `30s` (порог недоступности `5m`):
+* `id` (*int64*): Уникальный ключ.
+* `device_identifier` (*string*): Идентификатор устройства.
+* `previous_state` (*string*): Предыдущее состояние.
+* `new_state` (*string*): Новое состояние.
+* `duration_offline_sec` (*int64*): Суммарная длительность простоя при восстановлении.
+* `transition_at` (*timestamp*): Момент фиксации перехода.
+
+---
+
+## 3. Доступ и автоочистка
+* **Права доступа**: Пользователи `ADMIN` и `OPERATOR` имеют доступ на чтение к `/audit` и `/api/audit/{security,alerts,transitions}`.
+* **Срок хранения**: `RetentionManager` каждые 24ч удаляет записи старше `MONITOR_RETENTION_DAYS` (`90` дней по умолчанию) из этих трех таблиц и `telemetry`.

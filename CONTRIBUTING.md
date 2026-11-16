@@ -18,7 +18,7 @@ When participating in this project, all contributors are expected to treat the c
 
 ### 2.1 Reporting Bugs
 * **Search Existing Issues**: Check whether the issue has already been reported.
-* **Environment Details**: Always provide the Go version (`go version`), Linux distribution (`lsb_release -a`), Mosquitto version, and whether the bug occurs in Desktop mode (Wails) or Headless mode (`--headless`).
+* **Environment Details**: Always provide the Go version (`go version`), Linux distribution (`lsb_release -a`), Mosquitto version, and whether the bug occurs in Desktop mode (Wails), Headless mode (`--headless`), or Demo mode (`--demo`).
 * **Relevant Logs**: Attach console logs or execute `journalctl -u noxfort-monitor -f`.
 
 ### 2.2 Suggesting Improvements & New Features
@@ -37,8 +37,8 @@ When participating in this project, all contributors are expected to treat the c
    ```bash
    make test
    ```
-4. If you added new features, add corresponding unit tests in `*_test.go` using repository mocks.
-5. Keep documentation synchronized: if you changed database parameters, flags, or REST routes, update the relevant documents in `docs/`.
+4. If you added new features, add corresponding unit tests in `*_test.go` (Go backend) or `web/static/js/__tests__/*.test.js` (Vitest frontend) using mocks.
+5. Keep documentation synchronized: if you changed database schemas/parameters, CLI flags, environment variables, metrics, or REST/MQTT routes, update the relevant documents in `docs/` (including multi-language hubs).
 
 ---
 
@@ -49,7 +49,8 @@ To maintain codebase consistency, strict compliance with the following standards
 * **Zero Global Variables**: Dependencies must always be injected via constructors (`New...`) at the composition root ([`cmd/server/main.go`](cmd/server/main.go)).
 * **Depend on Abstractions**: Core system logic (`internal/monitor`, `internal/security`) must only depend on interfaces declared in [`internal/domain`](internal/domain), never on concrete database or network implementations.
 * **Dual-Engine Compatibility**: Any new SQL query must use [`storage.AdaptQuery`](docs/DATABASE.md) to ensure transparent operation across both SQLite and PostgreSQL.
-* **Security Isolation**: Password hashes and tokens must never be exposed in JSON payloads or plaintext logs.
+* **Security Isolation & Secret Redaction**: Password hashes, raw session tokens, SMTP passwords, Telegram/DuckDNS tokens, and active device API keys must never be exposed in JSON responses, rendered HTML DOM, or plaintext logs.
+* **Configuration Discipline**: Never reintroduce legacy static YAML files (`configs/config.yaml` was removed); runtime settings reside in `.env` / environment variables, `~/Documentos/Monitor/database_config.json`, `auth_config.json`, and the `settings` table.
 
 Refer to the **[Advanced Developer Guide](docs/DEVELOPER_GUIDES.md)** for detailed development and architectural instructions.
 

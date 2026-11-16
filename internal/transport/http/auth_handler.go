@@ -29,6 +29,11 @@ import (
 	"noxfort-monitor-server/internal/domain"
 )
 
+// AuthLockoutService extends AuthService with brute-force failure metadata and client IP tracking.
+type AuthLockoutService interface {
+	AuthenticateWithAttempt(username, password, clientIP string) (*domain.User, domain.AuthAttemptResult, error)
+}
+
 // AuthService defines the authentication and session management contract required by HTTP transport.
 type AuthService interface {
 	Authenticate(username, password string) (*domain.User, error)
@@ -93,16 +98,38 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username, password := parseCredentials(r)
+	clientIP := ExtractClientIP(r)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	user, err := h.authService.Authenticate(username, password)
+	var user *domain.User
+	var attempt domain.AuthAttemptResult
+	var err error
+	if lockoutSvc, ok := h.authService.(AuthLockoutService); ok {
+		user, attempt, err = lockoutSvc.AuthenticateWithAttempt(username, password, clientIP)
+	} else {
+		user, err = h.authService.Authenticate(username, password)
+	}
+
 	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		statusCode := http.StatusUnauthorized
+		if attempt.IsLockdown {
+			statusCode = http.StatusTooManyRequests
+		}
+		w.WriteHeader(statusCode)
+		resp := map[string]interface{}{
 			"success": false,
 			"message": err.Error(),
-		})
+		}
+		if attempt.MaxAttempts > 0 {
+			resp["failed_attempts"] = attempt.FailedAttempts
+			resp["max_attempts"] = attempt.MaxAttempts
+			resp["is_lockdown"] = attempt.IsLockdown
+			if attempt.RetryAfterSeconds > 0 {
+				resp["retry_after_seconds"] = attempt.RetryAfterSeconds
+			}
+		}
+		_ = json.NewEncoder(w).Encode(resp)
 		return
 	}
 
@@ -112,6 +139,7 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   IsHTTPSRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -136,6 +164,7 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Unix(1, 0),
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   IsHTTPSRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 

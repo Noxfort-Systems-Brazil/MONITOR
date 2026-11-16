@@ -20,6 +20,19 @@
 
 const RemoteTunnelAPI = {
     /**
+     * Safely parses JSON response payloads and falls back to plain text on unexpected errors.
+     */
+    async _parseResponseData(res) {
+        try {
+            return await res.json();
+        } catch (_) {
+            const text = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+            const msg = text || `HTTP ${res.status || 500}`;
+            return { success: false, error: msg, message: msg };
+        }
+    },
+
+    /**
      * Retrieves current tunnel state, URLs, and IPv6 information.
      */
     async getStatus() {
@@ -50,7 +63,7 @@ const RemoteTunnelAPI = {
                 'Accept': 'application/json'
             }
         });
-        const data = await res.json();
+        const data = await this._parseResponseData(res);
         return { ok: res.ok && data.success, data };
     },
 
@@ -70,7 +83,7 @@ const RemoteTunnelAPI = {
                 'Accept': 'application/json'
             }
         });
-        const data = await res.json();
+        const data = await this._parseResponseData(res);
         return { ok: res.ok && data.success, data };
     },
 
@@ -78,8 +91,12 @@ const RemoteTunnelAPI = {
      * Stops the active DuckDNS tunnel and disables auto-start.
      */
     async stopTunnel() {
-        const res = await fetch('/api/tunnel/stop', { method: 'POST' });
-        return { ok: res.ok };
+        const res = await fetch('/api/tunnel/stop', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' }
+        });
+        const data = res.ok ? {} : await this._parseResponseData(res);
+        return { ok: res.ok, data };
     },
 
     /**
@@ -93,9 +110,12 @@ const RemoteTunnelAPI = {
         const res = await fetch('/api/tunnel/test', {
             method: 'POST',
             body: body,
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json'
+            }
         });
-        const data = await res.json();
+        const data = await this._parseResponseData(res);
         return { ok: res.ok && data.success, data };
     },
 
@@ -103,11 +123,11 @@ const RemoteTunnelAPI = {
      * Clears stored DuckDNS credentials and terminates the service.
      */
     async disconnect() {
-        const res = await fetch('/api/tunnel/disconnect', { method: 'POST' });
-        let data = {};
-        try {
-            data = await res.json();
-        } catch (_) {}
+        const res = await fetch('/api/tunnel/disconnect', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' }
+        });
+        const data = await this._parseResponseData(res);
         return { ok: res.ok, data };
     }
 };

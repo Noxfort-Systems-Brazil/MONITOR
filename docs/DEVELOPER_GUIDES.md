@@ -33,7 +33,9 @@ This document provides software engineering guidelines for building, maintaining
 | `make build` | Compiles the Wails desktop binary with production tags (`bin/noxfort-monitor`). |
 | `make run` | Runs the full application in development mode with graphical desktop interface. |
 | `make run-headless` | Runs the server in Headless mode (without opening desktop windows). |
-| `make test` | Executes the complete automated test suite with verbose output. |
+| `make test` | Executes the complete automated test suite (`test-backend` Go + `test-frontend` Vitest). |
+| `make lint` | Runs `go vet ./...` static analysis. |
+| `make record-demo` | Launches Playwright demo presentation recording against `--demo` server. |
 | `make deb` | Builds the Debian distribution package (`.deb`). |
 | `make broker-start` | Starts the native Mosquitto MQTT broker. |
 | `make broker-stop` | Stops the MQTT broker. |
@@ -58,11 +60,14 @@ The persistence layer in [`internal/storage`](../internal/storage) isolates stor
       SetDB(db *sql.DB, driver string)
   }
   ```
-* When an operator switches between SQLite and PostgreSQL, [`DBManager`](../internal/storage/db_manager.go) notifies all registered repositories via `SetDB`.
+* When an operator switches between SQLite and PostgreSQL (or restores a SQLite backup via `RestoreSQLiteFile`), [`DBManager`](../internal/storage/db_manager.go) notifies all 7 registered repositories (including [`DBSessionStore`](../internal/storage/session_repo.go)) via `SetDB`.
 
-### 2.3 Concurrency Best Practices
+### 2.3 Concurrency, Retries & Instrumentation Best Practices
 * **Watchdog State Tracking**: Equipment presence is tracked in memory via [`SystemStatusTracker`](../internal/monitor/tracker.go), protected by a `sync.RWMutex` to eliminate race conditions.
-* **Asynchronous Alert Dispatch**: Notifications dispatched via Email (SMTP) and Telegram run in independent goroutines inside [`AlertService.TriggerAlert()`](../internal/monitor/alerts.go). Network latency from external mail servers never blocks the MQTT event processing pipeline.
+* **Asynchronous Alert Dispatch & Shutdown**: Notifications dispatched via Email (SMTP with implicit TLS 465 and CRLF sanitization) and Telegram run in `sync.WaitGroup`-tracked goroutines inside [`AlertService`](../internal/monitor/alerts.go) with automatic retry backoff and `Shutdown(ctx)` draining.
+* **Template Rendering & Session View Context**: HTTP page handlers must use `RenderPageWithRequest` / `RenderTemplateWithRequest` ([`template_cache.go`](../internal/transport/http/template_cache.go)) so cached templates receive `CurrentUser`, `Role`, `IsAdmin`, and `IsOperator`.
+* **Prometheus Metrics Instrumentation**: Use thread-safe counters and gauges in [`internal/metrics`](../internal/metrics/metrics.go) (`IncTelemetryIngested`, `IncTelemetryRejected`, `IncAlertDispatched`, `SetBufferDepth`) rather than package-local globals.
+* **Background Lifecycle Context**: Long-running maintenance workers (`DBSessionStore.StartCleanup`, `RetentionManager.Start`, `BackupManager.StartScheduledBackups`) attach to `bgCtx` in `main.go` so graceful shutdown terminates every worker cleanly.
 
 ---
 

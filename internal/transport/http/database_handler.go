@@ -25,7 +25,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
+	"path/filepath"
+	"strings"
 
 	"noxfort-monitor-server/internal/domain"
 )
@@ -42,6 +43,12 @@ type DatabaseService interface {
 type BackupService interface {
 	CreateBackup() (domain.BackupMetadata, error)
 	ListBackups() ([]domain.BackupMetadata, error)
+}
+
+// BackupRestoreService extends BackupService with validated path resolution and restore execution.
+type BackupRestoreService interface {
+	ResolveBackupPath(filename string) (string, error)
+	RestoreBackup(filename string) error
 }
 
 // DatabaseHandler manages database connection settings, testing, and schema provisioning APIs.
@@ -77,7 +84,7 @@ func (h *DatabaseHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		"Title": "Server & Storage Engine",
 	}
 
-	if err := RenderPage(w, "web/templates/server.html", data); err != nil {
+	if err := RenderPageWithRequest(w, r, "web/templates/server.html", data); err != nil {
 		log.Printf("[SERVER_PAGE] Template error: %v", err)
 		http.Error(w, "Template Error", http.StatusInternalServerError)
 		return
@@ -160,15 +167,8 @@ func (h *DatabaseHandler) HandleSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.auditRepo != nil {
-		details := fmt.Sprintf("Motor: %s, Banco: %s, Schema: %s, Migração: %v", cfg.Type, cfg.DBName, cfg.Schema, migrate)
-		_ = h.auditRepo.SaveSecurityAuditLog(&domain.SecurityAuditLog{
-			Username:  "admin",
-			Action:    "DATABASE_CONFIG_UPDATED",
-			Details:   details,
-			CreatedAt: time.Now(),
-		})
-	}
+	details := fmt.Sprintf("Motor: %s, Banco: %s, Schema: %s, Migração: %v", cfg.Type, cfg.DBName, cfg.Schema, migrate)
+	logSecurityAuditEvent(h.auditRepo, r, "DATABASE_CONFIG_UPDATED", details)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -205,14 +205,7 @@ func (h *DatabaseHandler) HandleBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.auditRepo != nil {
-		_ = h.auditRepo.SaveSecurityAuditLog(&domain.SecurityAuditLog{
-			Username:  "admin",
-			Action:    "DATABASE_BACKUP_CREATED",
-			Details:   fmt.Sprintf("Arquivo: %s, Tamanho: %d bytes, Motor: %s", info.Filename, info.SizeBytes, info.Driver),
-			CreatedAt: time.Now(),
-		})
-	}
+	logSecurityAuditEvent(h.auditRepo, r, "DATABASE_BACKUP_CREATED", fmt.Sprintf("Arquivo: %s, Tamanho: %d bytes, Motor: %s", info.Filename, info.SizeBytes, info.Driver))
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -241,4 +234,83 @@ func (h *DatabaseHandler) HandleListBackups(w http.ResponseWriter, r *http.Reque
 	}
 
 	_ = json.NewEncoder(w).Encode(list)
+}
+
+// HandleDownloadBackup securely streams an existing backup file to an authenticated administrator.
+func (h *DatabaseHandler) HandleDownloadBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	resolver, ok := h.backupService.(BackupRestoreService)
+	if !ok || resolver == nil {
+		http.Error(w, `{"success":false,"error":"Serviço de backup indisponível"}`, http.StatusNotImplemented)
+		return
+	}
+
+	filename := strings.TrimSpace(r.URL.Query().Get("file"))
+	fullPath, err := resolver.ResolveBackupPath(filename)
+	if err != nil {
+		http.Error(w, `{"success":false,"error":"Arquivo de backup inválido ou não encontrado"}`, http.StatusBadRequest)
+		return
+	}
+
+	logSecurityAuditEvent(h.auditRepo, r, "DATABASE_BACKUP_DOWNLOADED", fmt.Sprintf("Backup baixado: %s", filepath.Base(fullPath)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(fullPath)))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	http.ServeFile(w, r, fullPath)
+}
+
+// HandleRestoreBackup restores the active database from a previously generated snapshot.
+func (h *DatabaseHandler) HandleRestoreBackup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	restorer, ok := h.backupService.(BackupRestoreService)
+	if !ok || restorer == nil {
+		w.WriteHeader(http.StatusNotImplemented)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Restauração de backup não configurada",
+		})
+		return
+	}
+
+	filename := strings.TrimSpace(r.FormValue("filename"))
+	if filename == "" && strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		var req struct {
+			Filename string `json:"filename"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			filename = strings.TrimSpace(req.Filename)
+		}
+	}
+
+	if filename == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Nome do arquivo de backup é obrigatório",
+		})
+		return
+	}
+
+	if err := restorer.RestoreBackup(filename); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Falha ao restaurar backup: %v", err),
+		})
+		return
+	}
+
+	logSecurityAuditEvent(h.auditRepo, r, "DATABASE_BACKUP_RESTORED", fmt.Sprintf("Banco restaurado a partir de: %s", filename))
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Banco restaurado com sucesso a partir de %s!", filename),
+	})
 }

@@ -104,13 +104,18 @@ func GetAuthConfigFilepath() string {
 	return filepath.Join(dataDir, "auth_config.json")
 }
 
+// LoadDotEnv loads environment variables from .env files at most once across the process.
+func LoadDotEnv() {
+	dotEnvOnce.Do(loadDotEnv)
+}
+
 // ResolveSuperuserCredentials dynamically determines active credentials.
 // Precedence:
 // 1. Environment variables (.env loaded or system env vars: MONITOR_ADMIN_USER / NOXFORT_ADMIN_USER)
 // 2. Local config file (~/Documentos/Monitor/auth_config.json outside Git)
 // 3. Fallback defaults for GitHub clones (admin / admin)
 func ResolveSuperuserCredentials() SuperuserCredentials {
-	dotEnvOnce.Do(loadDotEnv)
+	LoadDotEnv()
 
 	user := strings.TrimSpace(os.Getenv("MONITOR_ADMIN_USER"))
 	if user == "" {

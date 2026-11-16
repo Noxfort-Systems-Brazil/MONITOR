@@ -39,6 +39,44 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     console.log("Noxfort Monitor UI Loaded.");
+
+    // 2b. Authenticated Self-Service Password Update
+    const btnSelfPass = document.getElementById('btn-submit-self-pass');
+    if (btnSelfPass) {
+        btnSelfPass.addEventListener('click', async () => {
+            const alertEl = document.getElementById('self-pass-alert');
+            const username = document.getElementById('self_pass_username')?.value || '';
+            const currentPassword = document.getElementById('self_current_password')?.value || '';
+            const newPassword = document.getElementById('self_new_password')?.value || '';
+            if (!currentPassword || !newPassword) return;
+
+            btnSelfPass.disabled = true;
+            try {
+                const fd = new FormData();
+                fd.append('username', username);
+                fd.append('current_password', currentPassword);
+                fd.append('new_password', newPassword);
+                const res = await fetch('/api/users/password', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (alertEl) {
+                    alertEl.className = res.ok && data.success ? 'alert alert-success small mb-3' : 'alert alert-danger small mb-3';
+                    alertEl.textContent = (res.ok && data.success ? '✅ ' : '❌ ') + (data.message || 'Erro ao atualizar senha.');
+                    alertEl.classList.remove('d-none');
+                }
+                if (res.ok && data.success) {
+                    setTimeout(() => window.location.replace('/login'), 1000);
+                }
+            } catch (err) {
+                if (alertEl) {
+                    alertEl.className = 'alert alert-danger small mb-3';
+                    alertEl.textContent = '❌ Falha de comunicação: ' + err.message;
+                    alertEl.classList.remove('d-none');
+                }
+            } finally {
+                btnSelfPass.disabled = false;
+            }
+        });
+    }
 });
 
 // 3. Native & Web Fullscreen Handler (F11 to toggle, Escape to exit)

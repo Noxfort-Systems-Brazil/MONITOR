@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"noxfort-monitor-server/internal/domain"
+	"noxfort-monitor-server/internal/metrics"
 )
 
 // BufferedTelemetryWriter collects events in an in-memory queue and flushes them in batches.
@@ -73,10 +74,12 @@ func (w *BufferedTelemetryWriter) Enqueue(identifier string, event *domain.Incom
 
 	select {
 	case w.queue <- TelemetryRecord{Identifier: identifier, Event: event}:
+		metrics.SetBufferDepth(int64(len(w.queue)))
 		return true
 	default:
 		// Queue full fallback
 		_ = w.repo.SaveEvent(identifier, event)
+		metrics.SetBufferDepth(int64(len(w.queue)))
 		return true
 	}
 }
@@ -85,6 +88,11 @@ func (w *BufferedTelemetryWriter) Enqueue(identifier string, event *domain.Incom
 func (w *BufferedTelemetryWriter) SaveEvent(identifier string, event *domain.IncomingEvent) error {
 	w.Enqueue(identifier, event)
 	return nil
+}
+
+// SaveEventReturningID persists directly to obtain the telemetry primary key for alert audit linkage.
+func (w *BufferedTelemetryWriter) SaveEventReturningID(identifier string, event *domain.IncomingEvent) (int64, error) {
+	return w.repo.SaveEventReturningID(identifier, event)
 }
 
 func (w *BufferedTelemetryWriter) worker() {
@@ -102,6 +110,7 @@ func (w *BufferedTelemetryWriter) worker() {
 			log.Printf("[STORAGE] Buffered write error: %v", err)
 		}
 		batch = batch[:0]
+		metrics.SetBufferDepth(int64(len(w.queue)))
 	}
 
 	for {

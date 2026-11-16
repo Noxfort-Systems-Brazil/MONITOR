@@ -1,6 +1,6 @@
 # 🏛️ Noxfort Monitor™ : Architecture Système et Concurrence
 
-Ce document spécifie l'architecture interne de **Noxfort Monitor™ v2.0**, détaillant l'architecture orientée événements (EDA), la concurrence multithread via Goroutines, le découpage en couches SOLID et l'assemblage racine.
+Ce document spécifie l'architecture interne de **Noxfort Monitor™ v2.0** : architecture orientée événements (EDA), modèle de concurrence Goroutines, appairage Zero-Trust, persistance double-moteur et assemblage à la racine.
 
 ⬅️ [Hub Central](../README.md) | 📡 [API Réseau](api_reference.md) | 🗄️ [Base de Données](database.md) | 🔐 [Sécurité](security.md) | 🧪 [Tests](testing.md)
 
@@ -8,64 +8,66 @@ Ce document spécifie l'architecture interne de **Noxfort Monitor™ v2.0**, dé
 
 ## 1. Philosophie d'Architecture
 
-Noxfort Monitor repose sur une **Architecture Orientée Événements (EDA)** rigoureuse couplée aux principes **SOLID** et à l'**Injection de Dépendances (DI)** assemblée dans `cmd/server/main.go`. Le système élimine tout état global mutable partagé et tout paquet à initialisation opaque.
+Noxfort Monitor suit une **Architecture Orientée Événements (EDA)** couplée aux principes **SOLID** et à l'**Injection de Dépendances (DI)** assemblée dans [`cmd/server/main.go`](../../cmd/server/main.go). La configuration démarre depuis `.env` via `LoadDotEnv()` (`configs/config.yaml` a été supprimé), sans état global mutable.
 
 ```mermaid
 graph TD
     subgraph "Monde Extérieur & Nœuds Distants"
         LocalDevice[Périphérique Local / LAN]
-        RemoteDevice[Agent Distant / WAN (Carina, Synapse)]
+        RemoteDevice["Agent Distant / WAN (Carina, Synapse)"]
         Operator[Navigateur / Opérateur Humain]
     end
 
-    subgraph "Couche Réseau & Transport"
-        MQTT[Broker MQTT :1883]
-        Ngrok[Tunnel Ngrok / WAN HTTPS]
-        HTTP[Serveur HTTP :22100]
-        AuthMW[AuthMiddleware - RBAC]
+    subgraph "Couche Réseau & Sécurité"
+        MQTT["Broker MQTT :1883 (noxfort/telemetry/#)"]
+        Proxy[Caddy / Ngrok / DuckDNS]
+        HTTP["Serveur HTTP :22100"]
+        AuthMW["AuthMiddleware (DBSessionStore + Lockout + RBAC)"]
     end
 
-    subgraph "Couche Logique & Sécurité"
-        StateManager[Gestionnaire d'État]
-        Watchdog[Moteur Watchdog]
-        Alerts[Service de Routage d'Alertes]
-        SecManager[Gestionnaire de Sécurité]
-        TunnelMgr[Gestionnaire de Tunnel]
+    subgraph "Couche Logique & Observabilité"
+        StateManager["StateManager (Garde PAUSED)"]
+        Watchdog["Engine / Watchdog (30s / 5m)"]
+        Writer[BufferedTelemetryWriter]
+        Alerts["AlertService (Backoff + Shutdown)"]
+        Metrics["internal/metrics (/metrics)"]
     end
 
     subgraph "Persistance Double-Moteur (internal/storage)"
-        DBMgr[DBManager Central]
-        AuditRepo[AuditRepository]
-        PG[(PostgreSQL Industriel)]
-        SQLite[(SQLite Pur sans CGO)]
+        DBMgr["DBManager (7 Dépôts Rechargeables)"]
+        Retention["RetentionManager (90j)"]
+        Backup["BackupManager (VACUUM INTO / pg_dump)"]
+        PG[(PostgreSQL)]
+        SQLite[(SQLite WAL sans CGO)]
     end
 
-    subgraph "Canaux de Notification Externes"
-        Telegram[Telegram Bot API (MarkdownV2)]
-        Email[Serveur SMTP (E-mail)]
+    subgraph "Canaux Externes"
+        Telegram[Telegram Bot API MarkdownV2]
+        Email["SMTP (TLS Implicite 465 + CRLF Safe)"]
+        Webhook[Webhook HTTP]
     end
 
-    LocalDevice -- "Publication MQTT" --> MQTT
-    RemoteDevice -- "HTTPS POST /api/telemetry" --> Ngrok
-    Ngrok --> HTTP
-    Operator -- "HTTP GET / POST" --> HTTP
+    LocalDevice -->|"MQTT (MONITOR_MQTT_STRICT)"| MQTT
+    RemoteDevice -->|"POST /api/pair & /api/telemetry"| Proxy
+    Proxy -->|"X-Forwarded-For / Proto"| HTTP
+    Operator -->|"Cookie + RBAC"| HTTP
 
-    MQTT -- "Décode Payload" --> StateManager
-    HTTP --> AuthMW
-    AuthMW --> StateManager
-    AuthMW --> SecManager
+    MQTT --> StateManager
+    HTTP --> AuthMW --> StateManager
 
-    StateManager -- "1. Persiste Incident" --> DBMgr
-    StateManager -- "2. Déclenche Alerte" --> Alerts
-    Watchdog -- "Vérifie Battements" --> DBMgr
-    Watchdog -- "Synthétise Panne/Rétablissement" --> Alerts
-    Watchdog -- "Enregistre Transition" --> AuditRepo
+    StateManager --> Writer
+    StateManager --> Alerts
+    Watchdog --> DBMgr
+    Watchdog --> Alerts
+    Writer --> DBMgr
+    Retention --> DBMgr
+    Backup --> DBMgr
+    HTTP --> Metrics
 
-    Alerts -- "Goroutines Concurrentes" --> Telegram
-    Alerts -- "Goroutines Concurrentes" --> Email
-    Alerts -- "Enregistre SLA d'Envoi" --> AuditRepo
+    Alerts --> Telegram
+    Alerts --> Email
+    Alerts --> Webhook
 
-    SecManager -- "Audite Connexions" --> AuditRepo
     DBMgr --> PG
     DBMgr --> SQLite
 ```
@@ -74,36 +76,17 @@ graph TD
 
 ## 2. Découpage Modulaire des Couches
 
-1. **Couche Transport (`internal/transport`)** : Terminaison des protocoles réseau (broker MQTT Paho et serveur HTTP REST avec `AuthMiddleware`).
-2. **Couche Logique de Surveillance (`internal/monitor`)** : Machine à états réactive (`StateManager`), détection de pannes silencieuses (`Engine`/Watchdog) et routage d'alertes (`AlertService`).
-3. **Couche Sécurité (`internal/security`)** : Gestion des sessions, hachage de mots de passe avec sel, jetons d'accès et contrôle d'accès basé sur les rôles (RBAC).
-4. **Couche Accès Distant (`internal/tunnel`)** : Tunnel inverse sécurisé via Ngrok pour l'ingestion de nœuds de terrain sur les réseaux WAN.
-5. **Couche Domaine (`internal/domain`)** : Modèles de données purs et contrats d'interfaces sans dépendance externe.
-6. **Couche Persistance (`internal/storage`)** : Gestionnaire double-moteur dynamique (`DBManager`), pilotes PostgreSQL et SQLite, adaptateur de dialectes et migration de données.
-7. **Couche Desktop (`internal/desktop`, `internal/tray`)** : Runtime natif en Wails v2 avec WebKitGTK, exclusion mutuelle via socket Unix et intégration de la barre des tâches.
+1. **Couche Transport (`internal/transport`)** : Client MQTT (`noxfort/telemetry/#`, politique `MONITOR_MQTT_STRICT`, boucle de reconnexion 5s et `Reconnect(brokerURL)` à chaud) et serveur HTTP REST (`:22100`) avec `AuthMiddleware`, `/api/pair`, `/api/telemetry` et `/metrics`.
+2. **Couche Surveillance & Alertes (`internal/monitor`)** : `StateManager` (protection Maintenance `PAUSED` et `SaveEventReturningID` synchrone), `Engine` (tick `30s`, seuil hors ligne `5m`, `CleanupExpiredPending()`), et `AlertService` (`500ms`/`1500ms` backoff + `Shutdown(ctx)`).
+3. **Couche Sécurité (`internal/security`)** : `PBKDF2Hasher` (`100 000` itérations), `LoginAttemptTracker` (5 échecs/15m $\rightarrow$ 5m `429`), `DBSessionStore` (`SHA-256` dans `sessions`, 24h), proxies de confiance (`TRUSTED_PROXIES`, `MONITOR_USE_HTTPS`) et RBAC strict (`OPERATOR` lecture seule + changement du propre mot de passe).
+4. **Couche Accès Distant (`internal/tunnel`)** : Pilotes DuckDNS et Ngrok sur `/remote` avec redaction HTML des secrets.
+5. **Couche Persistance (`internal/storage`)** : `DBManager` SQLite WAL + PostgreSQL, `7` `ReloadableRepository`, `MigrateData` transactionnel (9 tables), `BufferedTelemetryWriter`, `BackupManager` (planifié/téléchargement/restauration) et `RetentionManager` (`MONITOR_RETENTION_DAYS=90`).
+6. **Couche Desktop, Démo & Métriques (`internal/desktop`, `internal/tray`, `internal/metrics`)** : Runtime Wails v2 + WebKitGTK, socket IPC d'instance unique, modes `--demo` (`RunDesktopServer()`) et `--headless`, et export Prometheus (`/metrics`).
 
 ---
 
-## 3. Concurrence et Modèle de Goroutines
+## 3. Concurrence et Arrêt Maîtrisé
 
-```mermaid
-graph TD
-    Main[Thread Principal de l'OS / Goroutine Racine]
-    
-    Main -->|Mode Desktop Standard| WailsEventLoop[Boucle d'Événements Wails v2]
-    WailsEventLoop --> Systray[Callbacks GTK Systray]
-    WailsEventLoop --> WebKit[Fenêtre WebKitGTK]
-    
-    Main -->|Mode --headless| SigChan[Boucle de Signaux OS (SIGINT/SIGTERM)]
-
-    Main -.->|go func| HTTPServer[Serveur HTTP ListenAndServe :22100]
-    Main -.->|go func| MQTTListener[Boucle de Paquets MQTT Paho]
-    Main -.->|go func| WatchdogEngine[Boucle du Ticker - Intervalle 30s]
-    Main -.->|go func| AlertWorkers[Workers Concurrents Email/Telegram]
-```
-
-* **Thread Principal** : En mode desktop, exécute `desktopApp.Run()` (Wails v2). En mode `--headless`, bloque sur un canal de signaux de terminaison (`syscall.SIGTERM`, `os.Interrupt`).
-* **Serveur HTTP** : Exécuté dans une goroutine indépendante sur le port `22100` avec des délais de 15 secondes.
-* **Écouteur MQTT** : Gère les sockets TCP sur des goroutines d'E/S dédiées sur le port `1883`.
-* **Surveillance Watchdog** : Évalue les battements de cœur sur un canal cadencé par `time.Ticker` (> 5 minutes de silence).
-* **Arrêt Contrôlé** : Coordonné par une routine thread-safe `sync.Once` libérant tous les sockets et pools de connexions proprement.
+* **Thread Principal** : Mode desktop (`desktopApp.Run()`), mode `--demo` (`RunDesktopServer()`) ou `--headless` / `--server-only` (signaux `SIGINT`/`SIGTERM`).
+* **Goroutines (`bgCtx`)** : Serveur HTTP `:22100`, client MQTT, `BufferedTelemetryWriter`, `Engine` (`30s`), purge horaire de `sessions`, `RetentionManager` (24h) et sauvegardes planifiées (`MONITOR_BACKUP_INTERVAL_HOURS`).
+* **Fermeture Propre (`AlertService.Shutdown`)** : Vide les alertes en file avant de fermer les connexions SQL et MQTT.

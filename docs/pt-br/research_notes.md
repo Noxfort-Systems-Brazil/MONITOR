@@ -1,59 +1,45 @@
-# 🔬 Notas de Pesquisa e Decisões Técnicas: Noxfort Monitor™
+# Noxfort Monitor — Registros de Decisão Arquitetural (ADRs)
 
-Este documento consolida o registro de decisões arquiteturais (ADRs), benchmarks e o roadmap de pesquisa técnica do **Noxfort Monitor™**.
-
-⬅️ [Central de Documentação](README.md) | 🏛️ [Arquitetura](architecture.md) | 🗄️ [Banco de Dados](database.md) | 🌐 [Acesso Remoto](remote_access.md)
+Este documento registra as principais decisões de engenharia, compromisso de segurança e evolução estrutural do Noxfort Monitor.
 
 ---
 
-## 1. Persistência: Da Dependência de CGO à Arquitetura Dual-Engine
+## ADR-01: Remoção de `configs/config.yaml` em Favor de `.env` + Tabela `settings`
 
-### Contexto
-As versões iniciais dependiam exclusivamente do driver `mattn/go-sqlite3`, exigindo um compilador C (CGO) para compilar o executável. Isso gerava atrito severo em pipelines de CI/CD, compilação cruzada e empacotamento.
-
-### Decisão
-1. **Migração para Pure-Go SQLite**: Adoção do `modernc.org/sqlite`, viabilizando compilação 100% nativa em Go puro.
-2. **Evolução para Dual-Engine (SQLite + PostgreSQL)**: Em plantas industriais de grande porte, múltiplos operadores acessam a interface simultaneamente, causando contenção de locks (`database is locked`) no SQLite em escritas de alta frequência.
-3. **Hot-Reload com Zero Downtime**: Criação do [`DBManager`](database.md) para permitir a alternância dinâmica entre SQLite e PostgreSQL sem derrubar a ingestão de telemetria.
+* **Contexto**: Manter parâmetros duplicados entre arquivos YAML e banco SQL gerava inconsistência entre execução desktop e Docker.
+* **Decisão**: O arquivo `configs/config.yaml` foi removido. Variáveis de bootstrap carregam via `LoadDotEnv()` a partir do `.env`, enquanto configurações dinâmicas (MQTT broker URL, alertas, túneis) ficam no SQL `settings` com gatilho imediato (`SetOnMQTTConfigChanged` -> `Reconnect(brokerURL)`).
 
 ---
 
-## 2. Interface Desktop: Da Systray Simples ao Wails v2
+## ADR-02: Pareamento Zero-Trust Fora de Banda (`POST /api/pair`) e MQTT Estrito
 
-### Contexto
-A primeira versão utilizava um ícone de bandeja simples (`getlantern/systray`) que disparava o navegador padrão do sistema operacional, causando conflitos de sessão e falta de atalhos dedicados.
-
-### Decisão
-Migração para o **Wails v2** ([`desktop_app.md`](desktop_app.md)):
-* **WebKitGTK Nativo**: Renderização veloz e integrada de HTML5/Bootstrap sem o consumo excessivo de memória do Chromium/Electron.
-* **Ciclo de Vida Integrado**: A bandeja do sistema foi reescrita dentro do loop de eventos do Wails, permitindo minimizar para a bandeja ao fechar a janela (`HideWindowOnClose`).
-* **Isolamento de Sessão**: Interceptador de cabeçalhos sincroniza o cookie `noxfort_session` na memória do runtime desktop.
-* **Compatibilidade Headless**: Adição da flag `--headless` permitindo rodar o mesmo binário como daemon em servidores Linux sem servidor gráfico X11/Wayland.
+* **Contexto**: Auto-registrar dispositivos desconhecidos ou devolver chaves na resposta do `/api/pair` abria vetor de *spoofing* e saturação de fila.
+* **Decisão**:
+  * `POST /api/pair` limita payload a 64 KB, limita a fila `PENDING` a 50 entradas (`429`), retorna `409 Conflict` se já `ACTIVE` e responde `202 Accepted` **sem chave de API**.
+  * Um `ADMIN` aprova em `/devices` e copia a chave `nox_live_` (TTL de 5 minutos); `POST /api/telemetry` exige `X-Device-Token` / `Bearer`, `X-Device-Origin` e janela de replay `±300s`.
+  * `MONITOR_MQTT_STRICT=true` descarta publicações de dispositivos desconhecidos ou `PAUSED` em `noxfort/telemetry/#`.
 
 ---
 
-## 3. Conectividade WAN: DuckDNS + Caddy vs Túnel Ngrok
+## ADR-03: Sessões Persistentes Hasheadas (`DBSessionStore`) e Bloqueio Anti-Brute-Force
 
-### Contexto
-Agentes de telemetria externos (**Carina**, **Synapse**) e nós IoT operam fora da rede local do servidor. Inicialmente, o Monitor adotava apenas o túnel reverso do **Ngrok**. Porém, planos gratuitos impõem limites de largura de banda, expiração de túneis e dependência de infraestrutura proprietária de terceiros.
-
-### Decisão
-Evolução para arquitetura de conectividade dupla no subsistema [`internal/tunnel`](remote_access.md) e [`caddy/`](caddy_integration.md):
-1. **DuckDNS + Caddy Gateway (Primário / Recomendado)**:
-   * Atualizador dinâmico nativo em Go sincroniza IPv4 e IPv6 com o DuckDNS.
-   * Contêiner Caddy automatiza a emissão de certificados SSL/TLS via **desafio ACME DNS-01**.
-   * Não requer abertura de porta 80, terminando HTTPS com segurança na porta padrão 443 e expondo WebSockets seguros (`wss:///mqtt`) para o Mosquitto.
-2. **Túnel Reverso Ngrok (Contingência / Zero-Forwarding)**:
-   * Mantido como alternativa para redes com Carrier-Grade NAT (CGNAT) severo onde não é possível abrir portas no roteador de borda.
+* **Contexto**: Mapas em memória perdiam sessões em reinicializações ou trocas de banco, e faltava limitação de tentativas de login.
+* **Decisão**:
+  * `DBSessionStore` persiste hashes `SHA-256` (`token_hash`) na tabela `sessions` (TTL de 24h, limpeza horária) implementando `ReloadableRepository`.
+  * `PBKDF2Hasher` (`100.000` iterações HMAC-SHA256) e `LoginAttemptTracker` (5 falhas em 15m -> bloqueio de 5m com HTTP `429`) protegem a autenticação.
+  * `?token=` na URL foi explicitamente bloqueado e o perfil `OPERATOR` foi travado como estritamente somente leitura (+ autoatendimento `POST /api/users/password`).
 
 ---
 
-## 4. Roadmap e Linhas Futuras de Pesquisa
+## ADR-04: Integridade Dual-Engine (SQLite WAL), Backup/Restauração e Retenção
 
-### 4.1 Federação de Servidores com gRPC
-Para clusters distribuídos e comunicação matriz-filial de múltiplos servidores Monitor, está planejada a adição de replicação via **gRPC / Protocol Buffers**:
-* Redução drástica da sobrecarga de payload em links satelitais e de baixa latência.
-* Contratos imutáveis e fortemente tipados para sincronização da trilha de auditoria.
+* **Decisão**:
+  * Habilitado SQLite em modo WAL (`journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`).
+  * `Migrator.MigrateData` executa em **transação única** nas 9 tabelas, abortando `DBManager.Switch` em caso de falha.
+  * Introduzidos `BackupManager` (`VACUUM INTO`, `pg_dump -F c`, download + `PRAGMA quick_check` / `pg_restore`) e `RetentionManager` (`MONITOR_RETENTION_DAYS=90`).
 
-### 4.2 Detecção Preditiva de Anomalias
-Atualmente, alertas utilizam regras estáticas de limiar (ex: temperatura crítica). Está em estudo a incorporação de modelos leves de séries temporais em Go (como médias móveis ponderadas e inferência embarcada ONNX) para prever falhas antes que os limites críticos de operação sejam atingidos.
+---
+
+## ADR-05: Métricas Prometheus Nativas e Vínculo Síncrono de Alertas
+
+* **Decisão**: Criado `internal/metrics` (`/metrics`), adicionadas retentativas com backoff (`500ms`, `1500ms`) + `AlertService.Shutdown(ctx)` e persistência síncrona `SaveEventReturningID` em transições para vincular `alert_dispatch_logs.telemetry_id`.

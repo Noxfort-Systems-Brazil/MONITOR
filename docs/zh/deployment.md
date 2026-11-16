@@ -1,37 +1,44 @@
 # 🚀 生产环境部署指南
 
-本文档提供在工业级与企业级生产环境中部署 **Noxfort Monitor™ v2.0** 的详细步骤，包括 Debian 软件包 (`.deb`) 安装方式、基于 Systemd 的无界面（Headless）服务运行，以及反向代理网关配置（Caddy 或 NGINX）。
+本文档提供在工业与企业生产环境中部署 **Noxfort Monitor™ v2.0** 的最新指引：基于 `.env` 的配置体系（已移除 `configs/config.yaml`）、Debian 软件包 (`.deb`)、Systemd 无头服务、Docker Compose、反向代理与运维可观测性。
 
 ⬅️ [文档中心](../README.md) | 🏛️ [系统架构](architecture.md) | 🖥️ [桌面应用](desktop_app.md)
 
 ---
 
-## 1. 通过 Debian 软件包安装 (`.deb`)
+## 1. 环境变量配置 (`.env`)
 
-```bash
-# 构建 .deb 安装包（产物将生成在仓库根目录下：noxfort-monitor_2.0.1_amd64.deb）
-make deb
+旧版 `configs/config.yaml` 已彻底移除。核心引导参数通过 `LoadDotEnv()` 从 `.env` 读取（参见 `.env.example`），动态运行配置（MQTT Broker 地址、告警配置、远程隧道）则存储于 SQL `settings` 表。
 
-# 方式 A：通过 Makefile 自动安装或升级
-make install-deb
-
-# 方式 B：在目标 Ubuntu/Debian 机器上通过 dpkg 直接安装
-sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
-sudo apt-get install -f
-
-# 卸载程序：
-make uninstall-deb
-```
-
-安装脚本会自动将程序部署至 `/opt/noxfort-monitor/`、建立系统软链接 `/usr/local/bin/noxfort-monitor`、配置桌面图标并激活 Mosquitto MQTT 服务。
+| 变量名 | 默认值 | 说明 |
+|---|---|---|
+| `MONITOR_MQTT_STRICT` | `true` | 拒绝 `noxfort/telemetry/#` 上未注册或处于 `PAUSED` 状态设备的消息。 |
+| `TRUSTED_PROXIES` | *(空)* | 逗号分隔的可信代理 CIDR/IP，用于验证 `X-Real-IP`、`X-Forwarded-For` 与 `X-Forwarded-Proto`。 |
+| `MONITOR_USE_HTTPS` | `false` | 在 HTTPS 反向代理后启用 `Secure` Cookie 与 TLS 请求识别。 |
+| `MONITOR_RETENTION_DAYS` | `90` | `RetentionManager` 清理 `telemetry`、审计及状态记录的保留天数（每 24h 执行）。 |
+| `MONITOR_BACKUP_INTERVAL_HOURS` | `24` | `BackupManager` 自动热备份间隔小时数（最多保留 `7` 份归档）。 |
+| `MONITOR_DB_DRIVER` / `MONITOR_DB_*` | `sqlite` | 可选 PostgreSQL 启动直连参数。 |
 
 ---
 
-## 2. 独立 Systemd 服务（无头模式）
+## 2. Debian 软件包 (`.deb`) 与 Docker Compose
 
-适用于云主机或工控无显示屏服务器：
+```bash
+# .deb 安装包
+make deb
+make install-deb        # 或: sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb && sudo apt-get install -f
+make uninstall-deb
 
-### 2.1 服务单元文件 (`/etc/systemd/system/noxfort-monitor.service`)
+# Docker Compose（--headless + Mosquitto + 可选 PostgreSQL）
+cp .env.example .env
+docker compose up -d --build
+./scripts/setup_mqtt_auth.sh
+```
+
+---
+
+## 3. 独立 Systemd 服务（无头模式）
+
 ```ini
 [Unit]
 Description=Noxfort Monitor Server (Headless Mode)
@@ -55,58 +62,22 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 ```
 
-### 2.2 启动与自启设置
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now noxfort-monitor
-sudo journalctl -u noxfort-monitor -f
-```
-
 ---
 
-## 3. 反向代理与 HTTPS 网关 (Caddy 或 NGINX)
+## 4. 反向代理 (Caddy / NGINX)、热备份与 `/metrics`
 
-### 3.1 方案 A：Caddy Server 配合 DuckDNS（推荐方案）
-系统内置容器化 Caddy 边缘网关，支持基于 **DNS-01 ACME** 的全自动证书签发与续期：
-```bash
-make caddy-build
-make services-start
-```
-详细配置步骤请参阅 [Caddy 与 DuckDNS 集成指南](caddy_integration.md)。
+* **方案 A — Caddy (`caddy/Caddyfile`)**：执行 `make caddy-build && make services-start`（详见 [Caddy 集成指南](caddy_integration.md)）。
+* **方案 B — NGINX**：将 NGINX IP 加入 `TRUSTED_PROXIES` 并透传 Zero-Trust 接口（`/api/pair`、`/api/telemetry` 或 `/`）：
 
-### 3.2 方案 B：使用 NGINX 代理遥测接入
 ```nginx
-server {
-    listen 80;
-    server_name monitor.noxfort.internal;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name monitor.noxfort.internal;
-
-    ssl_certificate /etc/letsencrypt/live/monitor.noxfort.internal/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/monitor.noxfort.internal/privkey.pem;
-
-    # 代理外部边缘节点的遥测数据流
-    location /api/telemetry {
-        proxy_pass http://127.0.0.1:22100;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # 按安全设计，外部浏览器访问根路径直接返回 403 Forbidden
-    location / {
-        proxy_pass http://127.0.0.1:22100;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+location / {
+    proxy_pass http://127.0.0.1:22100;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
-> [!NOTE]
-> 外部 HTTP 端口已禁用直接通过网页浏览器访问后台仪表盘（返回 403 Forbidden）。图形界面管理操作仅允许在原生桌面客户端中运行。
+
+* **备份、保留与 Prometheus**：`BackupManager` 自动生成 `VACUUM INTO` / `pg_dump -F c` 快照并支持 `/api/settings/database/backups/download` 与 `/restore`，`RetentionManager` 定期裁剪过期数据，`GET /metrics` 提供 Prometheus 指标采集。

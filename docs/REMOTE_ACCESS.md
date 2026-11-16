@@ -135,12 +135,19 @@ When the remote access service is active, the Monitor UI automatically updates:
 1. In the **Monitored Systems** view (`/devices`), suggested ingestion commands adapt from LAN addresses (`192.168.x.x`) to the public HTTPS URL.
 2. The **"Copy Address"** button copies the full endpoint ready for client environment variables.
 
-### Remote Ingestion Example via cURL (DuckDNS / Caddy)
-Remote edge nodes post events over HTTPS to standard port 443:
+### Remote Pairing & Ingestion Example via cURL (DuckDNS / Caddy)
+Remote edge nodes onboard via `POST /api/pair` and post authenticated events over HTTPS using `X-Device-Token`:
 
 ```bash
+# 1. Initiate Zero-Trust pairing (copy the generated nox_live_... key from /devices within 5 minutes)
+curl -X POST "https://your-domain.duckdns.org/api/pair" \
+  -H "Content-Type: application/json" \
+  -d '{"origin": "carina-station-03", "name": "Carina Station 03"}'
+
+# 2. Post authenticated telemetry
 curl -X POST "https://your-domain.duckdns.org/api/telemetry" \
   -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_<your_device_api_key>" \
   -d '{
     "category": "HARDWARE",
     "origin": "carina-station-03",
@@ -161,13 +168,13 @@ curl -X POST "https://your-domain.duckdns.org/api/telemetry" \
 
 ## 5. Remote Access & Tunnel Control Endpoints
 
-All administrative tunnel operations require an authenticated session:
+All tunnel operations require an authenticated session (`OPERATOR` accounts have read-only access to `/remote` and `/api/tunnel/status`; mutations require `ADMIN` and are recorded in `security_audit_logs` as `TUNNEL_CONFIG_SAVED`, `TUNNEL_STARTED`, `TUNNEL_STOPPED`, and `TUNNEL_DISCONNECTED`; stored `duckdns_token` values are redacted from rendered HTML and preserved automatically on domain-only updates):
 
 | Method | Endpoint | Privilege | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/remote` | Operator / Admin | Graphical desktop UI for managing WAN connectivity and credentials. |
-| `GET` | `/api/tunnel/status` | Authenticated | Returns real-time health, provider name, and public telemetry URL. |
-| `POST` | `/api/tunnel/save` | Admin | Persists DuckDNS credentials and updates active configuration. |
+| `GET` | `/remote` | Operator+ (Read-Only for Operator) | Graphical desktop UI for viewing/managing WAN connectivity (token redacted in DOM). |
+| `GET` | `/api/tunnel/status` | Operator+ | Returns real-time health, provider name, and public telemetry URL. |
+| `POST` | `/api/tunnel/save` | Admin | Persists DuckDNS credentials (keeping existing token if blank) and updates active configuration. |
 | `POST` | `/api/tunnel/start` | Admin | Manually triggers dynamic DNS update or launches tunnel. |
 | `POST` | `/api/tunnel/stop` | Admin | Stops active WAN updates and disables auto-start on boot. |
 | `POST` | `/api/tunnel/disconnect` | Admin | Completely unlinks credentials from the database and terminates service. |

@@ -1,37 +1,44 @@
 # 🚀 Guide de Déploiement en Production
 
-Ce document fournit les instructions de déploiement de **Noxfort Monitor™ v2.0**, couvrant l'installation du service systemd en mode headless, la configuration d'un proxy inverse NGINX avec terminaison SSL et l'installation via paquet Debian (`.deb`).
+Ce document décrit le déploiement en production de **Noxfort Monitor™ v2.0** via `.env` (après suppression de `configs/config.yaml`), paquet Debian (`.deb`), systemd headless, Docker Compose, proxy inverse, sauvegardes automatisées et Prometheus.
 
 ⬅️ [Hub Central](../README.md) | 🏛️ [Architecture](architecture.md) | 🖥️ [Application Desktop](desktop_app.md)
 
 ---
 
-## 1. Installation par Paquet Debian (`.deb`)
+## 1. Configuration d'Environnement (`.env`)
 
-```bash
-# Génération du paquet .deb (généré à la racine comme noxfort-monitor_2.0.1_amd64.deb)
-make deb
+`configs/config.yaml` a été supprimé. Les paramètres de démarrage chargent depuis `.env` via `LoadDotEnv()` (`.env.example`), tandis que la configuration dynamique (URL MQTT, alertes, tunnels) est stockée dans la table SQL `settings`.
 
-# Option A : Installation ou mise à niveau automatique via Makefile
-make install-deb
-
-# Option B : Installation directe via dpkg
-sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
-sudo apt-get install -f
-
-# Pour désinstaller :
-make uninstall-deb
-```
-
-Le paquet installe l'exécutable dans `/opt/noxfort-monitor/`, crée le lien `/usr/local/bin/noxfort-monitor`, configure les raccourcis de bureau et active le service Mosquitto MQTT.
+| Variable | Défaut | Description |
+|---|---|---|
+| `MONITOR_MQTT_STRICT` | `true` | Ignore les publications MQTT (`noxfort/telemetry/#`) d'équipements inconnus ou `PAUSED`. |
+| `TRUSTED_PROXIES` | *(vide)* | CIDRs/IPs autorisés pour `X-Real-IP`, `X-Forwarded-For` et `X-Forwarded-Proto`. |
+| `MONITOR_USE_HTTPS` | `false` | Active les cookies `Secure` et la détection HTTPS derrière TLS. |
+| `MONITOR_RETENTION_DAYS` | `90` | Durée avant purge automatique (`RetentionManager`) de `telemetry`, audits, alertes et transitions. |
+| `MONITOR_BACKUP_INTERVAL_HOURS` | `24` | Fréquence des snapshots à chaud (`BackupManager`, conserve `7` archives). |
+| `MONITOR_DB_DRIVER` / `MONITOR_DB_*` | `sqlite` | Configuration optionnelle pour démarrage direct sur PostgreSQL. |
 
 ---
 
-## 2. Service Systemd Dédié (Mode Headless)
+## 2. Paquet Debian (`.deb`) et Docker Compose
 
-Recommandé pour les serveurs en nuage et machines sans écran :
+```bash
+# Paquet Debian
+make deb
+make install-deb        # Ou : sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb && sudo apt-get install -f
+make uninstall-deb
 
-### 2.1 Fichier d'Unité (`/etc/systemd/system/noxfort-monitor.service`)
+# Docker Compose (--headless + Mosquitto + PostgreSQL optionnel)
+cp .env.example .env
+docker compose up -d --build
+./scripts/setup_mqtt_auth.sh
+```
+
+---
+
+## 3. Service Systemd (Mode Headless)
+
 ```ini
 [Unit]
 Description=Noxfort Monitor Server (Mode Headless)
@@ -55,50 +62,24 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 ```
 
-### 2.2 Activation et Surveillance
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now noxfort-monitor
-sudo journalctl -u noxfort-monitor -f
-```
-
 ---
 
-## 3. Proxy Inverse et Passerelle HTTPS (Caddy ou NGINX)
+## 4. Proxy Inverse (Caddy / NGINX), Sauvegardes et `/metrics`
 
-### 3.1 Option A : Serveur Caddy avec DuckDNS (Recommandée)
-L'écosystème intègre une passerelle Caddy conteneurisée avec émission automatique de certificats via **DNS-01 ACME** :
-```bash
-make caddy-build
-make services-start
-```
-Consultez le guide complet dans [Intégration Caddy et DuckDNS](caddy_integration.md).
-
-### 3.2 Option B : NGINX pour l'Ingestion avec SSL
+* **Option A — Caddy (`caddy/Caddyfile`)** : `make caddy-build && make services-start` ([Intégration Caddy](caddy_integration.md)).
+* **Option B — NGINX** : Déclarez l'IP NGINX dans `TRUSTED_PROXIES` et transmettez :
 
 ```nginx
-server {
-    listen 80;
-    server_name monitor.noxfort.internal;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name monitor.noxfort.internal;
-
-    ssl_certificate /etc/letsencrypt/live/monitor.noxfort.internal/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/monitor.noxfort.internal/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:22100;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+location / {
+    proxy_pass http://127.0.0.1:22100;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
+
+* **Sauvegardes, Rétention et Prometheus** : `BackupManager` automatise `VACUUM INTO` / `pg_dump -F c` avec téléchargement et restauration (`/api/settings/database/restore`), `RetentionManager` purge les logs toutes les 24h et `GET /metrics` expose les métriques Prometheus.

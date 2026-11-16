@@ -1,37 +1,44 @@
 # 🚀 Руководство по развертыванию в продакшене
 
-Данный документ содержит пошаговые инструкции по развертыванию **Noxfort Monitor™ v2.0** в промышленной эксплуатации, включая установку systemd-сервиса в headless-режиме, настройку обратного прокси (Caddy или NGINX) и установку пакета Debian (`.deb`).
+Документ описывает развертывание **Noxfort Monitor™ v2.0** с конфигурацией `.env` (после удаления `configs/config.yaml`), пакетом `.deb`, systemd headless, Docker Compose, обратным прокси, плановыми бэкапами и Prometheus.
 
 ⬅️ [Главный Хаб](../README.md) | 🏛️ [Архитектура](architecture.md) | 🖥️ [Десктоп](desktop_app.md)
 
 ---
 
-## 1. Установка пакета Debian (`.deb`)
+## 1. Конфигурация окружения (`.env`)
 
-```bash
-# Сборка установочного пакета .deb (создается в корне репозитория как noxfort-monitor_2.0.1_amd64.deb)
-make deb
+Файл `configs/config.yaml` удален. Параметры запуска загружаются из `.env` функцией `LoadDotEnv()` (см. `.env.example`), а динамические настройки (URL брокера MQTT, оповещения, туннели) хранятся в SQL-таблице `settings`.
 
-# Вариант A: Автоматическая установка/обновление через Makefile
-make install-deb
-
-# Вариант B: Прямая установка через dpkg на целевом сервере Ubuntu/Debian
-sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
-sudo apt-get install -f
-
-# Для удаления:
-make uninstall-deb
-```
-
-Пакет устанавливает бинарные файлы в каталог `/opt/noxfort-monitor/`, создает симлинк `/usr/local/bin/noxfort-monitor`, регистрирует системные ярлыки и настраивает брокер Mosquitto MQTT.
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `MONITOR_MQTT_STRICT` | `true` | Отбрасывает MQTT-сообщения (`noxfort/telemetry/#`) от неизвестных или `PAUSED` узлов. |
+| `TRUSTED_PROXIES` | *(пусто)* | Список CIDR/IP доверенных прокси для `X-Real-IP`, `X-Forwarded-For` и `X-Forwarded-Proto`. |
+| `MONITOR_USE_HTTPS` | `false` | Включает `Secure` cookies и определение HTTPS за TLS-прокси. |
+| `MONITOR_RETENTION_DAYS` | `90` | Срок хранения записей до очистки `RetentionManager` (раз в 24ч). |
+| `MONITOR_BACKUP_INTERVAL_HOURS` | `24` | Интервал автоматических горячих бэкапов `BackupManager` (хранится до `7` копий). |
+| `MONITOR_DB_DRIVER` / `MONITOR_DB_*` | `sqlite` | Параметры прямого подключения к PostgreSQL при старте. |
 
 ---
 
-## 2. Выделенный сервис Systemd (Headless)
+## 2. Пакет Debian (`.deb`) и Docker Compose
 
-Рекомендуется для облачных виртуальных машин и серверов без монитора:
+```bash
+# Установка .deb
+make deb
+make install-deb        # Или: sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb && sudo apt-get install -f
+make uninstall-deb
 
-### 2.1 Файл юнита (`/etc/systemd/system/noxfort-monitor.service`)
+# Docker Compose (--headless + Mosquitto + опциональный PostgreSQL)
+cp .env.example .env
+docker compose up -d --build
+./scripts/setup_mqtt_auth.sh
+```
+
+---
+
+## 3. Выделенный сервис Systemd (Headless)
+
 ```ini
 [Unit]
 Description=Noxfort Monitor Server (Headless Mode)
@@ -55,58 +62,22 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 ```
 
-### 2.2 Запуск и включение автозагрузки
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now noxfort-monitor
-sudo journalctl -u noxfort-monitor -f
-```
-
 ---
 
-## 3. Обратный прокси и HTTPS-шлюз (Caddy или NGINX)
+## 4. Обратный прокси (Caddy / NGINX), бэкапы и `/metrics`
 
-### 3.1 Вариант A: Сервер Caddy с DuckDNS (Рекомендуется)
-Экосистема включает контейнеризированный пограничный шлюз Caddy с автоматическим получением сертификатов **DNS-01 ACME**:
-```bash
-make caddy-build
-make services-start
-```
-См. подробное руководство в [Интеграция Caddy и DuckDNS](caddy_integration.md).
+* **Вариант A — Caddy (`caddy/Caddyfile`)**: `make caddy-build && make services-start` ([Интеграция Caddy](caddy_integration.md)).
+* **Вариант B — NGINX**: Добавьте IP NGINX в `TRUSTED_PROXIES` и проксируйте `/api/pair`, `/api/telemetry` или `/`:
 
-### 3.2 Вариант B: NGINX для приема телеметрии
 ```nginx
-server {
-    listen 80;
-    server_name monitor.noxfort.internal;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name monitor.noxfort.internal;
-
-    ssl_certificate /etc/letsencrypt/live/monitor.noxfort.internal/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/monitor.noxfort.internal/privkey.pem;
-
-    # Проксирование телеметрии с внешних узлов Edge
-    location /api/telemetry {
-        proxy_pass http://127.0.0.1:22100;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Запросы веб-браузера к корню возвращают 403 Forbidden по соображениям безопасности
-    location / {
-        proxy_pass http://127.0.0.1:22100;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+location / {
+    proxy_pass http://127.0.0.1:22100;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
-> [!NOTE]
-> Доступ через обычный браузер отключен на внешних HTTP-портах (возвращается 403 Forbidden). Управление интерфейсом осуществляется исключительно через нативное десктопное приложение.
+
+* **Бэкапы, ретеншн и Prometheus**: `BackupManager` создает снимки `VACUUM INTO` / `pg_dump -F c` (с поддержкой `/api/settings/database/backups/download` и `/restore`), `RetentionManager` очищает старые логи, а `GET /metrics` отдает метрики для Prometheus.

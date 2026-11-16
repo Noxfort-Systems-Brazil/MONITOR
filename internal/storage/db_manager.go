@@ -23,7 +23,9 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -147,10 +149,12 @@ func (m *DBManager) Switch(newCfg domain.DatabaseConfig, migrate bool) error {
 	oldDriver := m.driver
 	driver := dialect.DriverName()
 
-	// Optional data migration
+	// Optional transactional data migration (abort switch if migration fails)
 	if migrate && oldDB != nil {
 		if err := MigrateData(oldDB, oldDriver, newDB, driver); err != nil {
-			log.Printf("[STORAGE] Data migration warning: %v", err)
+			m.mu.Unlock()
+			_ = newDB.Close()
+			return fmt.Errorf("data migration failed: %w", err)
 		}
 	}
 
@@ -175,6 +179,69 @@ func (m *DBManager) Switch(newCfg domain.DatabaseConfig, migrate bool) error {
 	}
 
 	log.Printf("[STORAGE] Successfully switched active database to %s (%s).", driver, newCfg.DBName)
+	return nil
+}
+
+// RestoreSQLiteFile safely replaces the active local SQLite file with a validated backup file,
+// cleaning WAL/SHM sidecars and reloading every registered repository atomically.
+func (m *DBManager) RestoreSQLiteFile(targetPath, backupPath string) error {
+	if targetPath == "" || targetPath == ":memory:" {
+		return fmt.Errorf("cannot restore file over non-persistent sqlite database")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.db != nil {
+		_ = m.db.Close()
+		m.db = nil
+	}
+	_ = os.Remove(targetPath + "-wal")
+	_ = os.Remove(targetPath + "-shm")
+
+	src, err := os.Open(backupPath)
+	if err != nil {
+		return fmt.Errorf("failed to open backup file: %w", err)
+	}
+	defer src.Close()
+
+	tmpPath := targetPath + ".restoring"
+	dst, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to stage restore file: %w", err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed copying backup contents: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed flushing restored file: %w", err)
+	}
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed replacing target sqlite file: %w", err)
+	}
+
+	newCfg := m.cfg
+	newCfg.Type = "sqlite"
+	newCfg.FilePath = targetPath
+	newDB, err := NewDatabase(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed reopening restored sqlite database: %w", err)
+	}
+
+	m.db = newDB
+	m.driver = "sqlite"
+	m.cfg = newCfg
+	_ = SaveDatabaseConfig(newCfg)
+
+	for _, r := range m.repositories {
+		r.SetDB(newDB, "sqlite")
+	}
+
+	log.Printf("[STORAGE] Restored SQLite database from backup '%s' to '%s'.", backupPath, targetPath)
 	return nil
 }
 

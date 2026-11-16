@@ -159,3 +159,33 @@ func TestStateManager_HeartbeatFailureDoesNotBlockIncident(t *testing.T) {
 		t.Errorf("Alert must be dispatched even if heartbeat update fails")
 	}
 }
+
+type mockPolicyHeartbeatUpdater struct {
+	mockHeartbeatUpdater
+	device *domain.Device
+}
+
+func (m *mockPolicyHeartbeatUpdater) GetByIdentifier(_ string) (*domain.Device, error) {
+	return m.device, nil
+}
+
+func TestStateManager_SuppressesPausedDevice(t *testing.T) {
+	devices := &mockPolicyHeartbeatUpdater{
+		device: &domain.Device{Identifier: "PAUSED-PLC", Status: "ACTIVE", Enabled: false},
+	}
+	events := &mockEventRecorder{}
+	alerts := &mockAlertDispatcher{}
+
+	sm := NewStateManager(events, devices, alerts)
+	sm.ProcessEvent("PAUSED-PLC", &domain.IncomingEvent{
+		Origin:     "PAUSED-PLC",
+		Level:      domain.LevelCritical,
+		Message:    "Maintenance shutdown",
+		OccurredAt: time.Now(),
+	})
+
+	if devices.calls != 0 || len(events.events) != 0 || len(alerts.alerts) != 0 {
+		t.Fatalf("Expected paused device telemetry and alerts to be suppressed, got updates=%d events=%d alerts=%d",
+			devices.calls, len(events.events), len(alerts.alerts))
+	}
+}

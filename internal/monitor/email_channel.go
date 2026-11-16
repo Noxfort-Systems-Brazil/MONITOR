@@ -21,8 +21,10 @@
 package monitor
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/smtp"
+	"strings"
 
 	"noxfort-monitor-server/internal/domain"
 )
@@ -32,7 +34,8 @@ type SMTPSenderFunc func(addr string, a smtp.Auth, from string, to []string, msg
 
 // EmailChannel handles email formatting and SMTP delivery.
 type EmailChannel struct {
-	sendMail SMTPSenderFunc
+	sendMail         SMTPSenderFunc
+	customSendMail   bool
 }
 
 // NewEmailChannel creates a new EmailChannel using standard net/smtp.SendMail.
@@ -42,7 +45,7 @@ func NewEmailChannel() *EmailChannel {
 
 // NewEmailChannelWithSender creates an EmailChannel with a custom SMTP sender (for testing).
 func NewEmailChannelWithSender(sender SMTPSenderFunc) *EmailChannel {
-	return &EmailChannel{sendMail: sender}
+	return &EmailChannel{sendMail: sender, customSendMail: true}
 }
 
 // Name returns the channel name.
@@ -103,15 +106,69 @@ func (c *EmailChannel) Test(settings *domain.Settings, to string) error {
 	return c.transmit(settings, to, subject, body)
 }
 
+func sanitizeEmailHeader(v string) string {
+	r := strings.NewReplacer("\r", "", "\n", "")
+	return strings.TrimSpace(r.Replace(v))
+}
+
 func (c *EmailChannel) transmit(settings *domain.Settings, to, subject, body string) error {
+	cleanTo := sanitizeEmailHeader(to)
+	cleanFrom := sanitizeEmailHeader(settings.SMTPFrom)
+	if cleanFrom == "" {
+		cleanFrom = sanitizeEmailHeader(settings.SMTPUser)
+	}
+	cleanSubject := sanitizeEmailHeader(subject)
+
 	auth := smtp.PlainAuth("", settings.SMTPUser, settings.SMTPPass, settings.SMTPHost)
 
 	msg := []byte(fmt.Sprintf("To: %s\r\n"+
 		"From: %s\r\n"+
 		"Subject: %s\r\n"+
 		"\r\n"+
-		"%s\r\n", to, settings.SMTPFrom, subject, body))
+		"%s\r\n", cleanTo, cleanFrom, cleanSubject, body))
 
 	addr := fmt.Sprintf("%s:%d", settings.SMTPHost, settings.SMTPPort)
-	return c.sendMail(addr, auth, settings.SMTPFrom, []string{to}, msg)
+	if settings.SMTPPort == 465 && !c.customSendMail {
+		return sendImplicitTLS(addr, settings.SMTPHost, auth, cleanFrom, []string{cleanTo}, msg)
+	}
+	return c.sendMail(addr, auth, cleanFrom, []string{cleanTo}, msg)
+}
+
+func sendImplicitTLS(addr, serverName string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: serverName, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		return err
+	}
+	client, err := smtp.NewClient(conn, serverName)
+	if err != nil {
+		_ = conn.Close()
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	if auth != nil {
+		if err := client.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	for _, rcpt := range to {
+		if err := client.Rcpt(rcpt); err != nil {
+			return err
+		}
+	}
+	wc, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := wc.Write(msg); err != nil {
+		_ = wc.Close()
+		return err
+	}
+	if err := wc.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }

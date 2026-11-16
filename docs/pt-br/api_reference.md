@@ -1,113 +1,111 @@
-# 📡 Referência de API e Protocolos de Ingestão
+# Noxfort Monitor — Referência de API e Protocolos
 
-Este documento especifica formalmente as interfaces de comunicação do **Noxfort Monitor™ v2.0**, cobrindo o protocolo de ingestão assíncrono via MQTT, o endpoint HTTP REST de telemetria e as APIs administrativas.
-
-⬅️ [Central de Documentação](../README.md) | 🏛️ [Arquitetura](architecture.md) | 🗄️ [Banco de Dados](database.md) | 🔐 [Segurança](security.md)
+Este documento descreve os protocolos de ingestão de borda (MQTT e HTTP Zero-Trust), endpoints REST administrativos, permissões RBAC e métricas Prometheus expostas pelo Noxfort Monitor.
 
 ---
 
-## 1. Protocolo de Ingestão MQTT
+## 1. Protocolo de Telemetria MQTT
 
-* **Endereço do Broker**: `tcp://127.0.0.1:1883`
-* **Padrão de Tópico Padrão**: `noxfort/devices/{identifier}/telemetry`
-* **Subscrição com Curinga**: `noxfort/devices/+/telemetry`
+O cliente MQTT integrado em Go assina tópicos de telemetria de forma assíncrona em tempo real.
 
-### Formato JSON Universal `IncomingEvent`
+* **Endereço do Broker**: Configurável via `/settings` (ex.: `tcp://127.0.0.1:1883`), com reconexão automática a cada 5 segundos na inicialização e `Reconnect(brokerURL)` ao vivo ao salvar alterações.
+* **Padrão de Tópico de Publicação**: `noxfort/telemetry/{identifier}`
+* **Assinatura Wildcard**: `noxfort/telemetry/#`
+* **Política Estrita de Dispositivos**: Controlada por `MONITOR_MQTT_STRICT` (padrão: `true`). Apenas dispositivos pré-cadastrados e `ACTIVE` são aceitos; mensagens de dispositivos não registrados ou `PAUSED` são descartadas.
+
+### Formato de Payload (JSON — `IncomingEvent`)
 
 ```json
 {
   "category": "HARDWARE",
-  "origin": "sensor-node-tx1",
+  "origin": "pump-01",
   "level": "CRITICAL",
   "message": "Superaquecimento detectado: Temperatura 95°C",
   "occurred_at": "2026-09-05T14:30:00Z"
 }
 ```
 
-#### Especificação dos Campos:
-* **`category`** (*String*): `HARDWARE` ou `SOFTWARE`. Controla as regras de roteamento RBAC (Hardware $\rightarrow$ Técnicos; Software $\rightarrow$ Programadores).
-* **`origin`** (*String*): Identificador exclusivo do nó (ex: `carina`, `synapse`, `pump-01`).
-* **`level`** (*String*): `INFO`, `WARNING` ou `CRITICAL`.
-  * Mensagens `INFO` contendo palavras-chave de keep-alive ("*system ok*", "*heartbeat*", "*online*") atualizam o timestamp de presença sem gerar ruído de alertas nem gravações desnecessárias no banco de dados.
-  * Mensagens `CRITICAL` disparam envio imediato de alertas multicanal.
-* **`message`** (*String*): Descrição legível da ocorrência operacional.
-* **`occurred_at`** (*String ISO-8601*): Timestamp UTC.
+* **`category`**: `HARDWARE` ou `SOFTWARE` (define o roteamento de alerta por perfil de contato).
+* **`origin`**: Identificador único do dispositivo (ex.: `pump-01`, `carina`, `synapse`).
+* **`level`**: `INFO`, `WARNING` ou `CRITICAL` (`INFO` com palavras de batimento atualiza `last_seen` sem gerar alertas; `CRITICAL` dispara persistência síncrona `SaveEventReturningID` e alertas ligados a `telemetry_id`).
+* **`message`**: Descrição legível do evento.
+* **`occurred_at`**: Carimbo UTC ISO-8601 (validado em `±300s` via HTTP).
 
 ---
 
-## 2. Ingestão de Telemetria via HTTP REST
+## 2. Pareamento Zero-Trust e Ingestão HTTP
 
-### `POST /api/telemetry`
-Projetado para agentes de campo (**Carina**, **Synapse**, microcontroladores IoT ou scripts cURL).
+Dispositivos que utilizam HTTP/HTTPS passam por um fluxo Zero-Trust fora de banda antes de enviar telemetria.
 
-* **Porta**: `22100` (ou URL pública HTTPS via DuckDNS/Caddy ou Ngrok)
-* **Autenticação**: Pública (isenta de middleware para atender nós autônomos de campo).
-* **Restrição de Rede**: No servidor externo (`ExternalIngestionHandler`), `POST /api/telemetry`, `/healthz`, `/api/health` e `/metrics` são acessíveis na porta `22100`. Requisições web/navegador a rotas de dashboard retornam **403 Forbidden**.
-* **Cabeçalho**: `Content-Type: application/json`
-* **Corpo**: Idêntico ao esquema JSON `IncomingEvent`.
+### Pré-registro de Dispositivo (`POST /api/pair`)
 
-```bash
-curl -X POST http://localhost:22100/api/telemetry \
-  -H "Content-Type: application/json" \
-  -d '{
-    "category": "SOFTWARE",
-    "origin": "synapse-core",
-    "level": "WARNING",
-    "message": "Pool de conexões em 85% da capacidade.",
-    "occurred_at": "2026-09-27T18:00:00Z"
-  }'
+* **Autenticação**: Pública (requisição inicial de pareamento).
+* **Limites**: Payload máximo de 64 KB; fila limitada a `50` dispositivos `PENDING` (`429 Too Many Requests` se excedida).
+* **Payload**:
+
+```json
+{
+  "origin": "edge-gw-01",
+  "name": "Edge Gateway 01"
+}
 ```
 
----
+* **Respostas**:
+  * `202 Accepted`: Dispositivo colocado na fila em estado `PENDING`. **Nenhuma chave de API é retornada na resposta** (aprovação fora de banda: o administrador gera/copia em `/devices` a chave temporária `nox_live_` com TTL de 5 minutos).
+  * `409 Conflict`: O dispositivo já está registrado como `ACTIVE`.
 
-## 3. Endpoints Administrativos e de Operação
+### Ingestão de Telemetria HTTP (`POST /api/telemetry`)
 
-*Disponíveis dentro da aplicação desktop nativa ou através de sessões autenticadas.*
-
-| Endpoint | Método | Papel Mínimo | Descrição |
-|---|---|---|---|
-| `/api/auth/login` | `POST` | Público | Autentica credenciais e emite cookie `noxfort_session`. |
-| `/api/auth/logout` | `POST` | Autenticado | Invalida o token de sessão ativo. |
-| `/api/auth/status` | `GET` | Público | Retorna estado de autenticação, usuário e papel da sessão. |
-| `/api/auth/register` | `POST` | Admin | Alias protegido de criação de conta com validação de complexidade de senha. |
-| `/devices` | `GET` | Operador+ | Renderiza a tela de gerenciamento de sistemas com equipamentos e `last_seen`. |
-| `/devices/delete` | `POST` | Admin | Remove um dispositivo via formulário POST (`id=xyz`) e redireciona (303). |
-| `/contacts` | `GET` | Operador+ | Renderiza o painel de gerenciamento da Equipe de Resposta. |
-| `/contacts/create` | `POST` | Admin | Cadastra novo contato de alerta (nome, email, telefone, telegram_chat_id, cargo). |
-| `/contacts/update` | `POST` | Admin | Atualiza dados e canais de notificação de um contato existente. |
-| `/contacts/delete` | `POST` | Admin | Remove um contato da equipe de resposta. |
-| `/api/users` | `GET` | Admin | Retorna listagem JSON com todos os operadores cadastrados. |
-| `/api/users/create` | `POST` | Admin | Cria nova conta de operador ou admin (exige senha forte de 8+ dígitos). |
-| `/api/users/delete` | `POST` | Admin | Remove uma conta de operador (o superusuário é protegido contra exclusão). |
-| `/api/settings/database/status` | `GET` | Autenticado | Retorna tipo do banco ativo (Postgres/SQLite), versão e latência. |
-| `/api/settings/database/test` | `POST` | Admin | Testa credenciais do PostgreSQL antes da troca. |
-| `/api/settings/database/save` | `POST` | Admin | Recarrega repositórios ativos com o motor de destino (opção `migrate=true`). |
-| `/api/settings/database/provision-user` | `POST` | Admin | Cria usuário dedicado com privilégios restritos no esquema do PostgreSQL. |
-| `/api/settings/database/backup` | `POST` | Admin | Dispara um snapshot consistente a quente do banco de dados (`VACUUM INTO` / `pg_dump`). |
-| `/api/settings/database/backups` | `GET` | Admin | Lista os snapshots de backup salvos no diretório `backups/`. |
-| `/api/tunnel/status` | `GET` | Autenticado | Retorna estado, provedor (DuckDNS/Ngrok), URLs e IPv6. |
-| `/api/tunnel/save` | `POST` | Admin | Persiste credenciais do DuckDNS / Ngrok no banco. |
-| `/api/tunnel/start` | `POST` | Admin | Dispara atualização dinâmica DuckDNS ou abre túnel. |
-| `/api/tunnel/stop` | `POST` | Admin | Pausa atualizações e desativa inicialização automática. |
-| `/api/tunnel/disconnect` | `POST` | Admin | Desvincula credenciais salvas e encerra o serviço. |
-| `/api/tunnel/test` | `POST` | Admin | Valida ativamente token e resolução DNS do DuckDNS. |
-| `/api/audit/security` | `GET` | Admin | Consulta logs de segurança e tentativas de login. |
-| `/api/audit/alerts` | `GET` | Admin | Consulta logs de SLA e entrega de alertas. |
-| `/api/audit/transitions` | `GET` | Admin | Consulta transições de estado dos nós (quedas/recuperações). |
-| `/settings/test` | `POST` | Admin | Dispara e-mail de teste utilizando as configurações SMTP ativas. |
-| `/settings/test-telegram` | `POST` | Admin | Dispara mensagem de teste MarkdownV2 para o Telegram configurado. |
-| `/api/open-external` | `POST` | Autenticado | Solicita a abertura de URL externa no navegador padrão do sistema operacional. |
-| `/api/window/toggle-fullscreen` | `POST` | Público | Alterna a janela Wails entre modo tela cheia e normal. |
-| `/api/window/exit-fullscreen` | `POST` | Público | Sai do modo tela cheia. |
+* **Autenticação**: Obrigatória via cabeçalho `X-Device-Token: <api_key>` ou `Authorization: Bearer <api_key>` (comparação em tempo constante).
+* **Anti-Spoofing e Proteção contra Replay**:
+  * `X-Device-Origin` é validado contra a origem/identificador registrado do dispositivo.
+  * Carimbos `occurred_at` fora da janela de tolerância de `±300s` (`±5m`) são rejeitados.
+* **Respostas**:
+  * `202 Accepted`: Enfileirado via `BufferedTelemetryWriter` (com persistência síncrona `SaveEventReturningID` em transições de estado).
+  * `401 Unauthorized`: Token ausente, expirado ou inválido.
+  * `403 Forbidden`: Dispositivo em Modo Manutenção (`PAUSED`) ou divergência de origem.
 
 ---
 
-## 4. Endpoints Públicos de Observabilidade e Diagnóstico
+## 3. Endpoints REST Administrativos e Web
 
-*Isentos de middleware para permitir scraping pelo Prometheus e checagens de liveness em contêineres.*
+Todos os endpoints protegidos utilizam sessões persistidas em cookie (`DBSessionStore`), rejeitam tokens via `?token=` na URL e aplicam RBAC (`ADMIN` vs. `OPERATOR` estritamente somente leitura).
 
-| Endpoint | Método | Descrição | Formato |
-|---|---|---|---|
-| `/healthz` | `GET` | Probe de liveness para orquestradores (retorna 200 `OK`). | `text/plain` |
-| `/api/health` | `GET` | Diagnóstico de saúde detalhado: estado e latência do banco de dados, status MQTT, uso de memória RAM, goroutines e dispositivos cadastrados. | `application/json` |
-| `/metrics` | `GET` | Métricas no formato do **Prometheus** (`noxfort_uptime_seconds`, `noxfort_goroutines`, `noxfort_db_status`, `noxfort_mqtt_connected`, etc.). | `text/plain; version=0.0.4` |
+| Endpoint | Método | Perfil | Descrição |
+| :--- | :--- | :--- | :--- |
+| `/api/auth/login` | `POST` | Público | Autentica usuário; aplica bloqueio `429` após 5 falhas em 15m (bloqueio de 5m). |
+| `/api/auth/logout` | `POST` | Operator+ | Revoga o hash de sessão atual na tabela `sessions`. |
+| `/api/dashboard/summary` | `GET` | Operator+ | Resumo JSON ao vivo (polling a cada 10s) nos 5 estados: `ONLINE`, `OFFLINE`, `PENDING`, `PAUSED`, `WAITING`. |
+| `/devices/create` | `POST` | Admin | Cria dispositivo e exibe a chave de API uma única vez. |
+| `/devices/update` | `POST` | Admin | Atualiza/renomeia dispositivo existente. |
+| `/devices/toggle` | `POST` | Admin | Alterna Modo Manutenção (`PAUSED` / `ACTIVE`). |
+| `/devices/rotate-key` | `POST` | Admin | Rotaciona a chave de API do dispositivo, invalidando a anterior. |
+| `/devices/delete` | `POST` | Admin | Remove permanentemente um dispositivo. |
+| `/api/users` | `GET` / `POST` | Admin | Lista usuários ou cria conta (`ADMIN` / `OPERATOR`). |
+| `/api/users/password` | `POST` | Operator+ | Troca da própria senha (exige `current_password`). |
+| `/api/users/role` | `POST` | Admin | Altera o perfil RBAC de um usuário. |
+| `/api/users/unlock` | `POST` | Admin | Desbloqueia conta bloqueada pelo `LoginAttemptTracker`. |
+| `/api/audit/security` | `GET` | Operator+ | Consulta registros de auditoria de segurança. |
+| `/api/audit/alerts` | `GET` | Operator+ | Consulta logs de disparo de alertas (ligados via `telemetry_id`). |
+| `/api/audit/transitions` | `GET` | Operator+ | Consulta transições históricas `ONLINE` / `OFFLINE`. |
+| `/api/settings/database/backups` | `GET` | Admin | Lista backups quentes disponíveis (SQLite/PostgreSQL). |
+| `/api/settings/database/backup` | `POST` | Admin | Gera backup imediato (`VACUUM INTO` / `pg_dump -F c`). |
+| `/api/settings/database/backups/download` | `GET` | Admin | Baixa backup verificado com proteção `ResolveBackupPath`. |
+| `/api/settings/database/restore` | `POST` | Admin | Restaura backup (`PRAGMA quick_check` / `pg_restore`). |
+
+---
+
+## 4. Saúde e Observabilidade Prometheus
+
+* **`GET /healthz`**: Sonda leve de vivacidade retornando `200 OK` (`text/plain`).
+* **`GET /api/health`**: Diagnóstico JSON completo informando status/latência do banco de dados, conexão MQTT, memória, goroutines e dispositivos.
+* **`GET /metrics`**: Endpoint nativo no formato Prometheus:
+  * `noxfort_uptime_seconds`
+  * `noxfort_goroutines`
+  * `noxfort_memory_heap_alloc_bytes`, `noxfort_memory_heap_sys_bytes`, `noxfort_memory_num_gc`
+  * `noxfort_db_status`, `noxfort_db_latency_ms`
+  * `noxfort_mqtt_connected`
+  * `noxfort_devices_total`, `noxfort_devices_by_status`
+  * `noxfort_telemetry_buffer_depth`
+  * `noxfort_telemetry_ingested_total`, `noxfort_telemetry_rejected_total`
+  * `noxfort_alerts_dispatched_total`

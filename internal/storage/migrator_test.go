@@ -45,9 +45,14 @@ func TestMigrateData_FullCoverage(t *testing.T) {
 	}
 	defer targetDB.Close()
 
-	// 1. Populate source with data
+	// 1. Populate source with full Zero-Trust device keys, sessions, contacts, users, telemetry & audits
 	devRepo := NewDeviceRepository(sourceDB)
-	_ = devRepo.UpdateLastSeen("test-origin", time.Now())
+	if _, err := devRepo.CreateManualDevice("Synapse Test", "test-origin", "nox_live_migrated_secret"); err != nil {
+		t.Fatalf("CreateManualDevice failed: %v", err)
+	}
+	_ = devRepo.SetDeviceEnabled("test-origin", false)
+	sessionStore := NewDBSessionStore(sourceDB, "sqlite", 2*time.Hour)
+	migratedTok := sessionStore.CreateSession("john_tech", domain.RoleOperator)
 
 	contactRepo := NewContactRepository(sourceDB)
 	_ = contactRepo.CreateContact(&domain.Contact{
@@ -97,11 +102,18 @@ func TestMigrateData_FullCoverage(t *testing.T) {
 		t.Fatalf("MigrateData returned error: %v", err)
 	}
 
-	// 3. Verify target has the migrated data
+	// 3. Verify target has the migrated data including API keys, paused state, and sessions
 	targetDevRepo := NewDeviceRepository(targetDB)
 	devices, err := targetDevRepo.GetAllDevices()
 	if err != nil || len(devices) == 0 {
-		t.Errorf("Expected migrated devices in target DB")
+		t.Fatalf("Expected migrated devices in target DB")
+	}
+	if devices[0].ApiKey != "nox_live_migrated_secret" || devices[0].Status != "ACTIVE" || devices[0].Enabled {
+		t.Fatalf("Expected device api_key/status/enabled preserved across migration, got %+v", devices[0])
+	}
+	targetSessions := NewDBSessionStore(targetDB, "sqlite", 2*time.Hour)
+	if u, r, ok := targetSessions.ValidateSession(migratedTok); !ok || u != "john_tech" || r != domain.RoleOperator {
+		t.Fatalf("Expected active session preserved across migration, got user=%q role=%q ok=%v", u, r, ok)
 	}
 
 	targetTelRepo := NewTelemetryRepository(targetDB)

@@ -1,88 +1,65 @@
 # 🔐 Sécurité, Authentification et Contrôle d'Accès (RBAC)
 
-Ce document spécifie l'architecture de sécurité de **Noxfort Monitor™ v2.0**, couvrant l'authentification, le cycle de vie des sessions, le hachage des mots de passe et le Contrôle d'Accès Basé sur les Rôles (RBAC).
+Ce document décrit les mesures de défense en profondeur de **Noxfort Monitor™ v2.0** : RBAC strict, dérivation PBKDF2, protection anti-force brute, sessions hachées persistantes, proxies de confiance, appairage Zero-Trust et durcissement des alertes.
 
 ⬅️ [Hub Central](../README.md) | 🏛️ [Architecture](architecture.md) | 🔍 [Piste d'Audit](audit_trail.md) | 📡 [API](api_reference.md)
 
 ---
 
-## 1. Ségrégation des Privilèges et Rôles
+## 1. Ségrégation des Privilèges et Rôles (RBAC)
 
-Noxfort Monitor applique une politique stricte d'habilitation :
-
-* **`RoleAdmin` ("ADMIN")** : Privilèges complets d'administration : gestion des utilisateurs, migration de bases de données, gestion du tunnel distant et configuration système.
-* **`RoleOperator` ("OPERATOR")** : Privilèges opérationnels : consultation de la télémétrie, des équipements enregistrés et de l'historique d'alertes.
-* **Rôles de Routage d'Incidents** :
-  * **`TECHNICIAN`** : Reçoit exclusivement les alertes de catégorie `HARDWARE`.
-  * **`PROGRAMMER`** : Reçoit exclusivement les alertes de catégorie `SOFTWARE`.
-  * **`ADMIN`** : Reçoit l'ensemble des alertes.
+* **`ADMIN`** : Privilèges complets (gestion des équipements/clés, comptes/rôles/déverrouillage, contacts, réglages système/MQTT, tunnels et basculement/sauvegarde/restauration SQL). Le superutilisateur et le dernier administrateur sont protégés contre la suppression (`DeleteUserByActor`).
+* **`OPERATOR` (Strictement en Lecture Seule)** : Autorisé uniquement sur les vues `GET` (tableau de bord, `/audit`, `/api/audit/*`, `/remote`, `/server`, `/settings`), `/api/auth/logout` et le changement de son propre mot de passe (`POST /api/users/password` avec `current_password`). Bloqué sur `/users`, les mutations `/api/users`, `/api/settings/database/backup*` et toute écriture :
+  * Les appels API/XHR (`/api/*`, `Accept: application/json`, `XMLHttpRequest`) reçoivent JSON **`403 Forbidden`**.
+  * Les vues HTML navigateur/desktop affichent la page dédiée [`web/templates/forbidden.html`](../../web/templates/forbidden.html).
 
 ---
 
-## 2. Politique de Mots de Passe et Hachage Cryptographique
+## 2. Dérivation PBKDF2 et Complexité des Mots de Passe
 
-### 2.1 Hachage avec Sel Cryptographique
-Les mots de passe sont protégés par dérivation SHA-256 avec sel cryptographique via [`internal/security/hasher.go`](../../internal/security/hasher.go) :
-* Sel aléatoire unique de 16 octets généré pour chaque compte (`crypto/rand`).
-* Mots de passe et empreintes sont strictement exclus de la sérialisation JSON (`json:"-"`).
-* Comparaison en temps constant pour prévenir les attaques temporelles.
-
-### 2.2 Politique Industrielle de Complexité des Mots de Passe (`password_validator.go`)
-Pour prémunir les environnements critiques contre les attaques par force brute, [`internal/security/password_validator.go`](../../internal/security/password_validator.go) impose des règles strictes via `ValidatePasswordComplexity()` :
-* **Longueur Minimale** : Au moins 8 caractères.
-* **Chiffre Numérique** : Au moins un chiffre (`0-9`).
-* **Lettre Majuscule** : Au moins une majuscule (`A-Z`).
-* **Lettre Minuscule** : Au moins une minuscule (`a-z`).
-* **Caractère Spécial** : Au moins un symbole (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\§¬¢£`).
-
-Toute création de compte ne respectant pas ces critères retourne HTTP `400 Bad Request`.
-
-### 2.3 Indicateur Dynamique de Force de Mot de Passe (`password_meter.js`)
-L'interface d'administration intègre un indicateur interactif en temps réel ([`web/static/js/password_meter.js`](../../web/static/js/password_meter.js)) :
-* Calcul de score dynamique de 0 à 4 lors de la saisie.
-* Checklist interactive des critères de sécurité avec retour visuel immédiat.
-* Blocage de soumission tant que les exigences ne sont pas validées.
+* **PBKDF2 HMAC-SHA256** : [`PBKDF2Hasher`](../../internal/security/hasher.go) applique **PBKDF2 HMAC-SHA256** avec **`100 000` itérations**, un sel aléatoire de **`16` octets** (`crypto/rand`) et une clé dérivée de **`32` octets**.
+* **Complexité (`ValidatePasswordComplexity`)** : Exige au moins 8 caractères, majuscule, minuscule, chiffre et caractère spécial lors des créations, mises à jour et initialisation du superutilisateur, complété par l'indicateur [`web/static/js/password_meter.js`](../../web/static/js/password_meter.js).
 
 ---
 
-## 3. Cycle de Vie des Sessions et AuthMiddleware
+## 3. Protection Anti-Force Brute (`LoginAttemptTracker`)
+
+* Les échecs d'authentification sur `POST /api/auth/login` sont suivis par clé composite `username|ip` (`ExtractClientIP`).
+* **Verrouillage** : Après **`5` tentatives échouées** en **`15` minutes**, un blocage de **`5` minutes** s'active avec code HTTP **`429 Too Many Requests`** et audit `AUTH_LOGIN_LOCKED`.
+* Un `ADMIN` peut lever ce blocage via `POST /api/users/unlock`.
+
+---
+
+## 4. Sessions Persistantes Hachées et Proxies de Confiance
 
 ```mermaid
 sequenceDiagram
     participant User as Opérateur / Navigateur
     participant MW as AuthMiddleware
-    participant SM as SessionManager
+    participant SM as DBSessionStore (SQLite / PG)
     participant App as Handler Protégé
 
     User->>MW: Requête HTTP (Cookie: noxfort_session=XYZ)
-    MW->>SM: ValidateSession("XYZ")
-    alt Session Valide
-        SM-->>MW: Session(User, RoleAdmin)
-        MW->>App: Transmet la Requête avec le Contexte Utilisateur
-        App-->>User: 200 OK (Rendu du Tableau de Bord)
-    else Session Invalide ou Expirée
-        MW-->>User: Redirection 303 vers /login (ou 401 Unauthorized pour /api/*)
+    MW->>SM: ValidateSession(SHA256("XYZ"))
+    alt Session Valide (< 24h)
+        SM-->>MW: Session(User, Role)
+        MW->>App: Transmet avec contrôle RBAC
+        App-->>User: 200 OK (ou 403 Forbidden si mutation OPERATOR)
+    else Session Invalide ou ?token= dans l'URL
+        MW-->>User: Redirection 303 vers /login (ou 401 Unauthorized)
     end
 ```
 
-* **Stockage en Mémoire** : Table de hachage synchronisée par mutex.
-* **Renouvellement Glissant** : Toute activité prolonge la validité de 24 heures.
-* **Interception Adaptée** : Les requêtes web sans session sont redirigées vers `/login` avec HTTP `303 See Other` ; les requêtes API retournent `401 Unauthorized`.
+* **`DBSessionStore`** : Les sessions sont persistées dans la table `sessions` en ne stockant que l'empreinte **`SHA-256` (`token_hash`)**, avec un **TTL fixe de `24h`** et un nettoyage horaire automatique. Participant à `ReloadableRepository`, elles survivent aux basculements SQLite $\leftrightarrow$ PostgreSQL.
+* **Rejet de `?token=`** : `ExtractSessionToken` rejette explicitement les jetons passés en query string (`?token=`) pour éviter les fuites dans les journaux.
+* **`TRUSTED_PROXIES` et `MONITOR_USE_HTTPS`** : `ExtractClientIP` et `IsHTTPSRequest` n'acceptent `X-Real-IP`, `X-Forwarded-For` et `X-Forwarded-Proto` (`caddy/Caddyfile`) que depuis les plages déclarées dans `TRUSTED_PROXIES`, garantissant des cookies `Secure` et des IP d'audit fiables.
 
 ---
 
-## 4. Renforcement du Broker MQTT et Hachage PBKDF2
-* **Désactivation de l'Accès Anonyme** : `allow_anonymous false` dans Mosquitto.
-* **Chiffrement Robuste** : Mots de passe hachés via PBKDF2 (SHA-512) initialisés via `make broker-auth`.
+## 5. Ingestion Zero-Trust, Rédaction HTML et Durcissement SMTP/MQTT
 
----
-
-## 5. Audit de Sécurité au Démarrage (`env_validator.go`)
-* **Permissions du Fichier `.env` (`0600`)** : Restreint les permissions en environnement Linux.
-* **Alerte d'Identifiants par Défaut** : Émet un avertissement critique si les identifiants d'usine (`admin` / `Admin@Noxfort2026!`) restent actifs en production.
-
----
-
-## 6. Bootstrap Idempotent du Superutilisateur (`superuser.go`)
-* Crée automatiquement le compte administrateur initial si aucun compte n'existe.
-* Supprime automatiquement le compte de test si des identifiants personnalisés sont configurés en production.
+* **Appairage Zero-Trust** : `POST /api/pair` place les équipements en file `PENDING` (max 50, `409 Conflict` si déjà `ACTIVE`) et répond `202` sans divulguer de secret ; `POST /api/telemetry` vérifie `X-Device-Token`/`Bearer` en temps constant, `X-Device-Origin` et une dérive maximale de `±300s`.
+* **MQTT Strict (`MONITOR_MQTT_STRICT=true`)** : Ignore les publications sur `noxfort/telemetry/#` provenant d'équipements inconnus ou en pause (`PAUSED`).
+* **Rédaction dans les Vues HTML** : `/settings`, `/remote` et `/devices` masquent `ApiKey` et `duckdns_token` et préservent les secrets existants lors d'enregistrements partiels.
+* **SMTP Sécurisé** : `EmailChannel` prend en charge TLS implicite sur le port `465` (`TLS 1.2+`) et assainit les en-têtes (`sanitizeEmailHeader`, suppression CRLF).
+* **Mosquitto, `env_validator.go` et `superuser.go`** : Authentification PBKDF2 (`./scripts/setup_mqtt_auth.sh`), vérification des droits `0600` du `.env`, alerte sur identifiants par défaut et amorçage idempotent du superutilisateur.

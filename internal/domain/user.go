@@ -37,11 +37,21 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// AuthAttemptResult summarizes brute-force protection state after a login attempt.
+type AuthAttemptResult struct {
+	FailedAttempts    int  `json:"failed_attempts"`
+	MaxAttempts       int  `json:"max_attempts"`
+	IsLockdown        bool `json:"is_lockdown"`
+	RetryAfterSeconds int  `json:"retry_after_seconds,omitempty"`
+}
+
 // UserRepository defines the persistence contract for user accounts.
 type UserRepository interface {
 	GetByUsername(username string) (*User, error)
 	List() ([]*User, error)
 	Create(user *User) error
+	UpdatePasswordHash(username, passwordHash string) error
+	UpdateRole(username, role string) error
 	Delete(id int64) error
 	DeleteByUsername(username string) error
 	CountAdmins() (int, error)

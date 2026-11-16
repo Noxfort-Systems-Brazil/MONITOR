@@ -102,4 +102,74 @@ describe('DatabaseApiClient', () => {
         expect(res.ok).toBe(true);
         expect(res.data.success).toBe(true);
     });
+
+    it('saveConnection handles HTTP 403 JSON and plain text fallback cleanly', async () => {
+        global.fetch = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            json: async () => ({ success: false, error: 'Acesso restrito' }),
+        });
+
+        const jsonRes = await client.saveConnection({ type: 'sqlite' });
+        expect(jsonRes.ok).toBe(false);
+        expect(jsonRes.data.error).toBe('Acesso restrito');
+
+        global.fetch = vi.fn().mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            json: async () => { throw new SyntaxError('Unexpected token'); },
+            text: async () => 'Acesso restrito em texto puro',
+        });
+
+        const textRes = await client.saveConnection({ type: 'sqlite' });
+        expect(textRes.ok).toBe(false);
+        expect(textRes.data.error).toBe('Acesso restrito em texto puro');
+    });
+
+    it('gerencia listagem, criação e restauração de backups via API', async () => {
+        global.fetch = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ backups: [{ filename: 'monitor_sqlite_new.db', size_bytes: 4096 }] }),
+                text: async () => '',
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ status: 'ok', filename: 'monitor_sqlite_new.db' }),
+                text: async () => '',
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ status: 'ok', message: 'Backup restaurado' }),
+                text: async () => '',
+            });
+
+        const listRes = await client.listBackups();
+        expect(listRes.backups).toHaveLength(1);
+        expect(listRes.backups[0].filename).toBe('monitor_sqlite_new.db');
+        expect(global.fetch).toHaveBeenNthCalledWith(1, '/api/settings/database/backups');
+
+        const createRes = await client.createBackup();
+        expect(createRes.ok).toBe(true);
+        expect(global.fetch).toHaveBeenNthCalledWith(
+            2,
+            '/api/settings/database/backup',
+            expect.objectContaining({ method: 'POST' }),
+        );
+
+        const restoreRes = await client.restoreBackup('monitor_sqlite_new.db');
+        expect(restoreRes.ok).toBe(true);
+        expect(global.fetch).toHaveBeenNthCalledWith(
+            3,
+            '/api/settings/database/restore',
+            expect.objectContaining({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ filename: 'monitor_sqlite_new.db' }),
+            }),
+        );
+    });
 });

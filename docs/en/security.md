@@ -1,102 +1,46 @@
-# 🔐 Security, Authentication & Role-Based Access Control (RBAC)
+# Noxfort Monitor — Security Architecture
 
-This document details the security architecture of **Noxfort Monitor™ v2.0**, including authentication, session token lifecycle, salted password hashing, and Role-Based Access Control (RBAC).
-
-⬅️ [Central Hub](../README.md) | 🏛️ [Architecture](architecture.md) | 🔍 [Audit Trail](audit_trail.md) | 📡 [API](api_reference.md)
+Noxfort Monitor implements defense-in-depth across user authentication, session persistence, edge device onboarding, secret handling, and alert transport.
 
 ---
 
-## 1. Security Architecture & RBAC
+## 1. Role-Based Access Control (RBAC)
 
-Noxfort Monitor enforces strict role segregation:
+Two operational roles govern access across both the HTTP API and the embedded Wails desktop UI:
 
-* **`RoleAdmin` ("ADMIN")**: Full administrative privileges: user management, database migration, reverse tunnel activation, and global system configuration.
-* **`RoleOperator` ("OPERATOR")**: Operational privileges: viewing dashboard telemetry, monitoring registered devices, and inspecting alerts.
-* **Incident Routing Roles**:
-  * **`TECHNICIAN`**: Receives only `HARDWARE` incident notifications.
-  * **`PROGRAMMER`**: Receives only `SOFTWARE` incident notifications.
-  * **`ADMIN`**: Receives all global incidents.
+* **`ADMIN`**: Full administrative privileges across device provisioning/key rotation, user/role/unlock management, alert contacts, system/MQTT settings, DuckDNS/Ngrok remote tunnels, and database switching/backup/restore. Superuser and last-admin accounts are protected against deletion (`DeleteUserByActor`).
+* **`OPERATOR` (Strictly Read-Only)**: Restricted to read-only observation (`GET` dashboard, `/audit`, `/api/audit/*`, `/remote`, `/server`, `/settings`), `/api/auth/logout`, and self-service `POST /api/users/password` (with `current_password`). Blocked from `/users`, `/api/users` mutations, `/api/settings/database/backup*`, and all state-changing actions:
+  * API / XHR clients (`Accept: application/json`, `/api/*`, `XMLHttpRequest`) receive `403 Forbidden` JSON.
+  * Desktop/browser HTML views render the custom `web/templates/forbidden.html` error page.
 
 ---
 
-## 2. Password Policy & Cryptographic Storage
+## 2. Password Hashing & Complexity Policy
 
-### 2.1 Cryptographic Storage & Salting
-Passwords are encrypted using cryptographic salt and SHA-256 derivation via [`internal/security/hasher.go`](../../internal/security/hasher.go):
-* Unique 16-byte random salt generated per user via `crypto/rand`.
-* Passwords and hashes are strictly excluded from JSON serialization (`json:"-"`).
-* Constant-time comparison defends against timing attacks.
-
-### 2.2 Industrial Password Complexity Policy (`password_validator.go`)
-To protect operational systems from brute-force intrusions, [`internal/security/password_validator.go`](../../internal/security/password_validator.go) enforces mandatory validation via `ValidatePasswordComplexity()`:
-* **Minimum Length**: At least 8 characters.
-* **Numeric Digit**: At least one digit (`0-9`).
-* **Uppercase Letter**: At least one uppercase letter (`A-Z`).
-* **Lowercase Letter**: At least one lowercase letter (`a-z`).
-* **Special Character**: At least one symbol (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\§¬¢£`).
-
-Any registration or user creation failing these criteria returns HTTP `400 Bad Request`.
-
-### 2.3 Interactive Password Strength Meter (`password_meter.js`)
-All account management views integrate real-time client-side feedback ([`web/static/js/password_meter.js`](../../web/static/js/password_meter.js)):
-* Dynamic score calculation (0 to 4) while typing.
-* Interactive requirements checklist with instant visual feedback.
-* Blocks form submission until all complexity criteria are fulfilled.
+* **Derivation Algorithm**: Passwords are hashed by `PBKDF2Hasher` using **PBKDF2 HMAC-SHA256** (`100,000` iterations, `16`-byte cryptographically random salt, `32`-byte derived key).
+* **Complexity Enforcement**: `ValidatePasswordComplexity` enforces length and character diversity requirements across account creation, password changes, and superuser initialization.
 
 ---
 
-## 3. Session Lifecycle & AuthMiddleware
+## 3. Brute-Force Protection (`LoginAttemptTracker`)
 
-```mermaid
-sequenceDiagram
-    participant User as Operator / Browser
-    participant MW as AuthMiddleware
-    participant SM as SessionManager
-    participant App as Protected Handler
-
-    User->>MW: HTTP Request (Cookie: noxfort_session=XYZ)
-    MW->>SM: ValidateSession("XYZ")
-    alt Valid Session
-        SM-->>MW: Session(User, RoleAdmin)
-        MW->>App: Forward Request with User Context
-        App-->>User: 200 OK (Render Dashboard)
-    else Invalid or Expired Session
-        MW-->>User: 303 Redirect to /login (or 401 Unauthorized for /api/*)
-    end
-```
-
-* **Session Storage**: In-memory thread-safe map with mutex synchronization.
-* **Sliding Renewal**: Active user requests renew the 24-hour expiration window.
-* **Dual Interception**: Web UI requests without a session redirect to `/login` with HTTP `303 See Other`; API calls return JSON `401 Unauthorized`.
+* Failed authentication attempts are tracked per composite key (`username|ip`, resolved through `ExtractClientIP`).
+* Threshold: **`5` failed attempts** within a **`15-minute`** sliding window triggers a **`5-minute` lockout**, returning HTTP **`429 Too Many Requests`** and logging `AUTH_LOGIN_LOCKED`.
+* Administrators can manually inspect and lift lockouts via `POST /api/users/unlock`.
 
 ---
 
-## 4. MQTT Broker Hardening & PBKDF2 Authentication
+## 4. Persistent Hashed Sessions & Proxy Awareness
 
-* **Anonymous Access Disabled**: [`mosquitto.conf`](../../mosquitto/config/mosquitto.conf) enforces `allow_anonymous false`.
-* **Strong Hashing**: Passwords stored in `mosquitto/config/passwd` use PBKDF2 (SHA-512) hashing.
-* **Automated Setup**: Command `make broker-auth` generates credentials and synchronizes `.env`.
-* **Git Protection**: Credential files (`passwd*`) are strictly excluded from version control.
-
----
-
-## 5. Environment Hardening & Startup Auditing (`env_validator.go`)
-
-At application boot, the environment validator verifies configuration integrity:
-* **File Permissions (`0600`)**: Restricts `.env` to owner-only read/write permissions on Linux.
-* **Weak Credential Alerts**: Emits a critical security warning if default credentials (`admin` / `Admin@Noxfort2026!`) remain in production.
-* **MQTT Credential Check**: Warns if `MQTT_USER` or `MQTT_PASSWORD` are absent before broker connection.
+* **Persistent Store (`DBSessionStore`)**: Active sessions are persisted in the `sessions` table rather than ephemeral memory. Only the **`SHA-256` hash (`token_hash`)** of the bearer token is stored, with a fixed **`24-hour` TTL** and an hourly background cleanup sweep. Because `DBSessionStore` implements `ReloadableRepository`, sessions survive live SQLite/PostgreSQL engine switches.
+* **No Query Tokens**: `ExtractSessionToken` reads the HTTP-only cookie (`Set-Cookie`) and explicitly rejects tokens passed in `?token=` URL query strings to prevent log and referrer leakage.
+* **Trusted Proxy & HTTPS Detection**: `ExtractClientIP` and `IsHTTPSRequest` evaluate `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto` (forwarded by `caddy/Caddyfile`) only against CIDR/IP entries in `TRUSTED_PROXIES`, combined with `MONITOR_USE_HTTPS`, so `Secure` cookies and audit IPs remain tamper-resistant.
 
 ---
 
-## 6. Idempotent Superuser Bootstrap (`superuser.go`)
+## 5. Edge Ingestion & Alert Transport Hardening
 
-At startup, the system evaluates `MONITOR_ADMIN_USER` and `MONITOR_ADMIN_PASSWORD`:
-* Provisions an `ADMIN` account if no administrator exists in the database.
-* Automatically purges the default test account if custom credentials are configured in production, eliminating backdoor access.
-
----
-
-## 7. Automated Secret Leak Prevention in CI/CD
-
-Continuous integration pipelines ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)) scan every commit to block `.env` files, private keys (`*.pem`, `*.key`), and Mosquitto password databases from being tracked in Git.
+* **Zero-Trust Device Pairing**: `POST /api/pair` registers untrusted devices as `PENDING` (Queue limit: 50, `409 Conflict` if already `ACTIVE`) and returns `202 Accepted` without ever returning a secret. The 5-minute TTL `nox_live_` token is issued out-of-band from the `/devices` UI and validated in constant time on `POST /api/telemetry` alongside `X-Device-Origin` and `±300s` replay protection.
+* **Strict MQTT Ingestion**: `MONITOR_MQTT_STRICT` (default `true`) drops MQTT payloads (`noxfort/telemetry/#`) from unknown or `PAUSED` devices.
+* **HTML Secret Redaction**: Web views (`/settings`, `/remote`, `/devices`) mask active `ApiKey` secrets and tokens such as `duckdns_token` in rendered HTML; partial configuration saves preserve unedited credentials.
+* **SMTP Hardening**: `EmailChannel` supports implicit TLS on port `465` (`TLS 1.2+` minimum) and applies `sanitizeEmailHeader` (CRLF stripping) to block SMTP header injection.

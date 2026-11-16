@@ -7,7 +7,7 @@ aliases: [Documentation Index, Overview, Portal]
 
 Welcome to the technical documentation library for **Noxfort Monitor™ v2.0** — an industrial event-driven telemetry ingestion, observability, and incident response platform developed in Go.
 
-Designed to operate seamlessly on **GitHub** and as an **[Obsidian](https://obsidian.md/) Knowledge Vault**, this documentation suite covers the event-driven Go concurrency model, dual-engine PostgreSQL & SQLite persistence, multi-channel alert dispatching (Telegram & SMTP), secure reverse tunneling via Ngrok, and native desktop integration powered by Wails v2.
+Designed to operate seamlessly on **GitHub**, **MkDocs Material**, and as an **[Obsidian](https://obsidian.md/) Knowledge Vault**, this documentation suite covers the event-driven Go concurrency model, Zero-Trust device pairing (`POST /api/pair` + `X-Device-Token`), dual-engine PostgreSQL & SQLite WAL persistence with automated retention & hot backup/restore, multi-channel alert dispatching (Telegram & SMTP TLS 465) with retry backoff, strict read-only Operator RBAC with persistent SHA-256 sessions and brute-force lockout, **DuckDNS + Caddy** automatic HTTPS / **Ngrok** reverse tunneling, Prometheus observability, and native desktop integration powered by **Wails v2**.
 
 ---
 
@@ -18,16 +18,17 @@ Designed to operate seamlessly on **GitHub** and as an **[Obsidian](https://obsi
 | 📚 **Master Map of Content** | Primary Obsidian Hub & Codebase Directory Map | [Explore Hub](INDEX.md) |
 | 🌐 **Multi-Language Hub** | Translations across English, Portuguese, Spanish, French, Russian & Chinese | [Language Hub](README.md) |
 | 🏛️ **System Architecture** | Event-Driven Architecture, Dependency Injection & Goroutine Concurrency | [View Blueprint](../ARCHITECTURE.md) |
-| 📡 **API & Ingestion Protocols** | MQTT Ingestion (`:1883`) & HTTP REST Ingestion (`/api/telemetry` at `:22100`) | [View API Reference](API_REFERENCE.md) |
-| 🗄️ **Dual-Engine Persistence** | PostgreSQL & SQLite, Live Hot-Reload (`DBManager`) & Zero-Downtime Migration | [View DB Specs](DATABASE.md) |
-| 🔐 **Security & RBAC** | Session Cookies, Salted Password Hashing, Superuser Bootstrap & RBAC | [View Security](SECURITY.md) |
-| 🌐 **Remote Access & Tunnel** | Ngrok Reverse Tunnel, Firewall/CGNAT Traversal & WAN Ingestion | [View Remote Access](REMOTE_ACCESS.md) |
-| 🖥️ **Desktop App & Headless** | Wails v2, WebKitGTK, Unix IPC Socket Lock, Systray & Headless Server Daemon | [View Desktop Guide](DESKTOP_APP.md) |
+| 📡 **API & Ingestion Protocols** | MQTT (`noxfort/telemetry/#`), Zero-Trust Pairing (`/api/pair`), HTTP REST & Prometheus `/metrics` | [View API Reference](API_REFERENCE.md) |
+| 🗄️ **Dual-Engine Persistence** | PostgreSQL & SQLite WAL, `DBManager` Hot-Reload, Backup/Restore & Retention | [View DB Specs](DATABASE.md) |
+| 🔐 **Security & RBAC** | Read-Only Operator RBAC, Persistent Sessions, Brute-Force Lockout & PBKDF2 | [View Security](SECURITY.md) |
+| 🌐 **Remote Access & Tunnel** | DuckDNS Dynamic DNS, Ngrok Reverse Tunnel & WAN Ingestion | [View Remote Access](REMOTE_ACCESS.md) |
+| 🛡️ **Caddy & DuckDNS (HTTPS)** | Automatic TLS/SSL with DNS-01 ACME, `X-Forwarded-*` & WSS MQTT Proxy | [View Caddy Guide](CADDY_INTEGRATION.md) |
+| 🖥️ **Desktop App & Headless** | Wails v2, WebKitGTK, Unix IPC Lock, Systray, `--headless` & `--demo` Modes | [View Desktop Guide](DESKTOP_APP.md) |
 | 🔍 **Audit Trail & SLA** | Triple Audit: Security Logs, Alert Dispatch SLA & Equipment Downtime | [View Audit Trail](AUDIT_TRAIL.md) |
-| 🚀 **Production Deployment** | Systemd Headless Daemon, NGINX SSL Reverse Proxy & Debian `.deb` Package | [View Deployment](DEPLOYMENT.md) |
-| 🧪 **Testing & Diagnostics** | Automated Pytest/Go Unit Tests, Repository Mocks, `mosquitto_pub` & `curl` | [View Testing](TESTING.md) |
+| 🚀 **Production Deployment** | Systemd Headless Daemon, Caddy/NGINX Proxy, Env Tuning & `.deb` Package | [View Deployment](DEPLOYMENT.md) |
+| 🧪 **Testing & Diagnostics** | Go Backend Unit Tests, Vitest Frontend DOM Suite, `mosquitto_pub` & `curl` | [View Testing](TESTING.md) |
 | 👨‍💻 **Developer Guides** | Local Environment, Dependency Injection & Extensibility | [View Dev Guides](DEVELOPER_GUIDES.md) |
-| 🔬 **Technical Decisions** | Architectural Decisions, CGO Elimination & Clustering Roadmap | [View Decisions](RESEARCH_NOTES.md) |
+| 🔬 **Technical Decisions** | Architectural Decisions, Zero-Trust Onboarding, Sessions & Instrumentation | [View Decisions](RESEARCH_NOTES.md) |
 
 ---
 
@@ -42,21 +43,23 @@ Designed to operate seamlessly on **GitHub** and as an **[Obsidian](https://obsi
       ┌───────────────────────────┼───────────────────────────┐
       ▼                           ▼                           ▼
 ┌──────────────┐          ┌──────────────┐          ┌──────────────────┐
-│ MQTT Broker  │          │ HTTP Server  │          │   Ngrok Tunnel   │
-│(tcp :1883)   │ ◄──────► │(REST :22100) │ ◄──────► │ (WAN Ingestion)  │
+│ MQTT Broker  │          │ HTTP Server  │          │ DuckDNS + Caddy  │
+│(noxfort/     │ ◄──────► │(:22100 REST/ │ ◄──────► │ / Ngrok Tunnel   │
+│ telemetry/#) │          │ Pair/Metrics)│          │ (WAN HTTPS/WSS)  │
 └──────┬───────┘          └──────┬───────┘          └──────────────────┘
-       │                         │
+       │ (Zero-Trust Policy)     │ (X-Device-Token + Anti-Replay)
        ▼                         ▼
 ┌──────────────┐          ┌──────────────┐          ┌──────────────────┐
 │ StateManager │ ◄──────► │   Watchdog   │ ◄──────► │  AlertService    │
-│(Filter & Act)│          │ (Silent Fail)│          │(Email / Telegram)│
+│(Maint/Filter)│          │(30s / TTL GC)│          │(Retry + TLS 465) │
 └──────┬───────┘          └──────┬───────┘          └────────┬─────────┘
        │                         │                           │
        └─────────────────────────┼───────────────────────────┘
                                  ▼
                     ┌─────────────────────────┐
                     │  Central DBManager      │
-                    │ (PostgreSQL <-> SQLite) │
+                    │ (PG <-> SQLite WAL)     │
+                    │ Sessions/Backup/Prune   │
                     └─────────────────────────┘
 ```
 

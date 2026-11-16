@@ -61,9 +61,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     let msg = data.message || 'Credenciais inválidas.';
                     if (data.is_lockdown) {
-                        msg = '🚨 SISTEMA EM LOCKDOWN! Apenas o Super Usuário Mestre pode desbloquear.';
+                        const waitSec = data.retry_after_seconds ? ` (${data.retry_after_seconds}s)` : '';
+                        msg = `🚨 CONTA BLOQUEADA POR EXCESSO DE TENTATIVAS${waitSec}!`;
                     } else if (data.failed_attempts > 0) {
-                        msg += ` (Tentativas: ${data.failed_attempts}/3)`;
+                        const maxAttempts = data.max_attempts || 5;
+                        msg += ` (Tentativas: ${data.failed_attempts}/${maxAttempts})`;
                     }
 
                     if (loginFeedback) {
@@ -223,4 +225,98 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    // 5. Toggle User Role (ADMIN <-> OPERATOR)
+    document.querySelectorAll('.btn-toggle-role').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const username = btn.getAttribute('data-username');
+            const currentRole = btn.getAttribute('data-role');
+            if (!username) return;
+            const nextRole = currentRole === 'ADMIN' ? 'OPERATOR' : 'ADMIN';
+            if (!confirm(`Alterar perfil de "${username}" para ${nextRole}? Sessões ativas do usuário serão encerradas.`)) {
+                return;
+            }
+            try {
+                const fd = new FormData();
+                fd.append('username', username);
+                fd.append('role', nextRole);
+                const res = await fetch('/api/users/role', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showActionAlert(`✅ Perfil de "${username}" alterado para ${nextRole}.`, 'success');
+                    setTimeout(() => window.location.reload(), 800);
+                } else {
+                    showActionAlert('❌ ' + (data.message || 'Falha ao alterar perfil.'), 'danger');
+                }
+            } catch (err) {
+                showActionAlert('❌ Erro de rede: ' + err.message, 'danger');
+            }
+        });
+    });
+
+    // 6. Unlock Account (clear brute-force counter)
+    document.querySelectorAll('.btn-unlock-user').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const username = btn.getAttribute('data-username');
+            if (!username) return;
+            try {
+                const fd = new FormData();
+                fd.append('username', username);
+                const res = await fetch('/api/users/unlock', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showActionAlert(`🔓 ${data.message || 'Desbloqueado!'} (${username})`, 'info');
+                } else {
+                    showActionAlert('❌ ' + (data.message || 'Falha ao desbloquear conta.'), 'danger');
+                }
+            } catch (err) {
+                showActionAlert('❌ Erro de rede: ' + err.message, 'danger');
+            }
+        });
+    });
+
+    // 7. Reset Password Modal
+    const resetModalEl = document.getElementById('modalResetUserPassword');
+    const resetTargetInput = document.getElementById('reset_target_username');
+    const resetTargetLabel = document.getElementById('reset-target-label');
+    const resetPassInput = document.getElementById('reset_new_password');
+    const btnConfirmReset = document.getElementById('btn-confirm-reset-pass');
+    const resetModal = (resetModalEl && window.bootstrap) ? new bootstrap.Modal(resetModalEl) : null;
+
+    document.querySelectorAll('.btn-reset-password').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const username = btn.getAttribute('data-username');
+            if (!username || !resetTargetInput) return;
+            resetTargetInput.value = username;
+            if (resetTargetLabel) resetTargetLabel.textContent = username;
+            if (resetPassInput) resetPassInput.value = '';
+            if (resetModal) resetModal.show();
+        });
+    });
+
+    if (btnConfirmReset) {
+        btnConfirmReset.addEventListener('click', async () => {
+            const username = resetTargetInput?.value.trim();
+            const newPassword = resetPassInput?.value || '';
+            if (!username || !newPassword) return;
+            btnConfirmReset.disabled = true;
+            try {
+                const fd = new FormData();
+                fd.append('username', username);
+                fd.append('new_password', newPassword);
+                const res = await fetch('/api/users/password', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    if (resetModal) resetModal.hide();
+                    showActionAlert(`🔑 ${data.message}`, 'success');
+                } else {
+                    showActionAlert('❌ ' + (data.message || 'Erro ao redefinir senha.'), 'danger');
+                }
+            } catch (err) {
+                showActionAlert('❌ Erro de rede: ' + err.message, 'danger');
+            } finally {
+                btnConfirmReset.disabled = false;
+            }
+        });
+    }
 });

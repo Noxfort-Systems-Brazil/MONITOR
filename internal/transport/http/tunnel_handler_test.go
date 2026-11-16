@@ -248,3 +248,44 @@ func TestTunnelHandler_HandleTest_ServiceError(t *testing.T) {
 		t.Errorf("Expected body to contain error message, got %s", rec.Body.String())
 	}
 }
+
+func TestTunnelHandler_ServePageRedactsTokenAndSavePreservesSecret(t *testing.T) {
+	repo := &mockSettingsRepoForHandler{
+		settings: &domain.Settings{
+			DuckDNSToken:  "secret-duck-token-999",
+			DuckDNSDomain: "noxfort-unit",
+		},
+	}
+	handler := NewTunnelHandler(repo, &mockTunnelService{status: tunnel.Status{State: tunnel.StateOffline}})
+
+	reqPage := httptest.NewRequest(http.MethodGet, "/remote", nil)
+	recPage := httptest.NewRecorder()
+	handler.ServePage(recPage, reqPage)
+	if recPage.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on /remote, got %d", recPage.Code)
+	}
+	if strings.Contains(recPage.Body.String(), "secret-duck-token-999") {
+		t.Fatal("SECURITY VIOLATION: DuckDNSToken leaked in rendered /remote HTML")
+	}
+
+	// Submitting empty duckdns_token with updated domain must keep existing token
+	form := url.Values{
+		"duckdns_token":  {""},
+		"duckdns_domain": {"noxfort-renamed"},
+	}
+	reqSave := httptest.NewRequest(http.MethodPost, "/api/tunnel/save", strings.NewReader(form.Encode()))
+	reqSave.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqSave.Header.Set("Accept", "application/json")
+	recSave := httptest.NewRecorder()
+	handler.HandleSave(recSave, reqSave)
+	if recSave.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on HandleSave, got %d: %s", recSave.Code, recSave.Body.String())
+	}
+	saved, _ := repo.GetSettings()
+	if saved.DuckDNSToken != "secret-duck-token-999" {
+		t.Errorf("Expected existing DuckDNSToken preserved on domain-only save, got %q", saved.DuckDNSToken)
+	}
+	if saved.DuckDNSDomain != "noxfort-renamed" {
+		t.Errorf("Expected DuckDNSDomain updated to noxfort-renamed, got %q", saved.DuckDNSDomain)
+	}
+}

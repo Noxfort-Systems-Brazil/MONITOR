@@ -102,13 +102,33 @@ WantedBy=multi-user.target
 ### 3.4 Configure the Production `.env` File
 Create `/home/noxfort/.env`:
 ```ini
+# --- Superuser & MQTT Authentication ---
 MONITOR_ADMIN_USER=corporate_admin
 MONITOR_ADMIN_PASSWORD=StrongEncryptedPassword123!
 MQTT_USER=noxfort_user
 MQTT_PASSWORD=SuperSecureMqttPass2026!
+MONITOR_MQTT_STRICT=true
+
+# --- HTTP & Reverse Proxy Trust ---
 PORT=22100
+MONITOR_USE_HTTPS=true
+# TRUSTED_PROXIES=10.0.0.0/8,192.168.100.5
+
+# --- Storage Retention & Scheduled Hot Backups ---
+MONITOR_RETENTION_DAYS=90
+MONITOR_BACKUP_INTERVAL_HOURS=24
+
+# --- Optional PostgreSQL Overrides ---
+# MONITOR_DB_TYPE=postgres
+# MONITOR_DB_HOST=127.0.0.1
+# MONITOR_DB_PORT=5432
+# MONITOR_DB_USER=user_monitor
+# MONITOR_DB_PASSWORD=your_secure_password
+# MONITOR_DB_NAME=noxfort_database
+# MONITOR_DB_SCHEMA=schema_monitor
+# MONITOR_DB_SSLMODE=require
 ```
-Restrict file permissions (mandatory for security):
+Restrict file permissions (mandatory for security — Noxfort Monitor also enforces `0600` automatically at boot):
 ```bash
 sudo chmod 600 /home/noxfort/.env
 sudo chown noxfort:noxfort /home/noxfort/.env
@@ -181,8 +201,8 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
-    # Telemetry ingestion endpoint for external IoT edge nodes
-    location /api/telemetry {
+    # Device Zero-Trust pairing & telemetry ingestion endpoints for external IoT edge nodes
+    location ~ ^/api/(pair|telemetry)$ {
         proxy_pass http://127.0.0.1:22100;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -199,12 +219,14 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
 > [!NOTE]
-> Direct web browser access to HTML dashboard routes returns **403 Forbidden**. Operator interactions are performed exclusively via the native desktop application.
+> Direct web browser access to HTML dashboard routes returns **403 Forbidden**. Operator interactions are performed exclusively via the native desktop application. Note that external telemetry agents must first onboard via `POST /api/pair` (or be pre-created in `/devices`) and supply `X-Device-Token` on every `POST /api/telemetry` call.
 
 ---
 
@@ -216,25 +238,24 @@ When the server operates behind industrial firewalls or carrier-grade NAT (CGNAT
 
 ---
 
-## 7. Automated Backups in Production
+## 7. Automated Backups & Retention in Production
 
-Configure an automated daily backup job using cron:
-
-```bash
-# Edit the noxfort user's crontab
-sudo crontab -u noxfort -e
-
-# Add a daily backup scheduled at 03:00 AM with automatic 7-day retention:
-0 3 * * * /opt/noxfort-monitor/scripts/backup.sh >> /var/log/noxfort-backup.log 2>&1
-```
+Noxfort Monitor runs **built-in scheduled backups** and **automated data retention pruning** inside the server process:
+* **Built-in Backup Scheduler**: Controlled by `MONITOR_BACKUP_INTERVAL_HOURS` (default `24` hours; `<= 0` disables), creating snapshots in `~/Documentos/Monitor/backups/` (`VACUUM INTO` for SQLite, `pg_dump -F c` for PostgreSQL) and retaining the latest 7 snapshots. Snapshots can also be created, downloaded, and restored directly from the `/server` Web UI (`ADMIN` only).
+* **Built-in Data Retention (`RetentionManager`)**: Controlled by `MONITOR_RETENTION_DAYS` (default `90` days; `<= 0` disables), pruning aged rows every 24 hours from `telemetry`, `alert_dispatch_logs`, `security_audit_logs`, and `device_state_transitions`.
+* **Optional External Cron Backup**:
+  ```bash
+  sudo crontab -u noxfort -e
+  0 3 * * * /opt/noxfort-monitor/scripts/backup.sh >> /var/log/noxfort-backup.log 2>&1
+  ```
 
 ---
 
 ## 8. Production Observability & Metrics
 
 For enterprise monitoring platforms (e.g., Prometheus, Grafana, Datadog):
-1. **Liveness Probe**: Configure container/load balancer health checks pointing to `http://<server-ip>:22100/healthz`.
-2. **Prometheus Scraping Job**: Add the following target to `/etc/prometheus/prometheus.yml`:
+1. **Liveness Probe**: Configure container/load balancer health checks pointing to `http://<server-ip>:22100/healthz` (or deep JSON diagnostics on `/api/health`).
+2. **Prometheus Scraping Job**: Add the following target to `/etc/prometheus/prometheus.yml` (collects runtime gauges plus `noxfort_devices_by_status`, `noxfort_telemetry_buffer_depth`, `noxfort_telemetry_ingested_total`, `noxfort_telemetry_rejected_total`, and `noxfort_alerts_dispatched_total`):
    ```yaml
    scrape_configs:
      - job_name: 'noxfort-monitor'

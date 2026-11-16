@@ -236,3 +236,75 @@ func TestDeviceRepository_PairingAndTokens(t *testing.T) {
 	}
 }
 
+func TestDeviceRepository_ZeroTrustHardeningAndLifecycle(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewDeviceRepository(db)
+
+	// 1. Active device must NOT be downgraded or overwritten by /api/pair (CreateOrUpdatePending)
+	created, err := repo.CreateManualDevice("Synapse Primary", "synapse-main", "nox_live_secret_main")
+	if err != nil {
+		t.Fatalf("CreateManualDevice failed: %v", err)
+	}
+	if created.Status != "ACTIVE" || !created.Enabled {
+		t.Fatalf("Expected created device ACTIVE & enabled, got status=%s enabled=%v", created.Status, created.Enabled)
+	}
+
+	exp := time.Now().Add(5 * time.Minute)
+	hijackAttempt := &domain.Device{
+		Identifier: "synapse-main",
+		Name:       "Hijacked Name",
+		ApiKey:     "nox_live_attacker",
+		Status:     "PENDING",
+		ExpiresAt:  &exp,
+		Enabled:    true,
+	}
+	if err := repo.CreateOrUpdatePending(hijackAttempt); err != domain.ErrDeviceAlreadyActive {
+		t.Fatalf("Expected ErrDeviceAlreadyActive when calling CreateOrUpdatePending on ACTIVE device, got: %v", err)
+	}
+
+	// 2. Rename, Pause, and ForceUpdateLastSeen must NOT unpause a paused device
+	if err := repo.UpdateDeviceName("synapse-main", "Synapse Renamed"); err != nil {
+		t.Fatalf("UpdateDeviceName failed: %v", err)
+	}
+	if err := repo.SetDeviceEnabled("synapse-main", false); err != nil {
+		t.Fatalf("SetDeviceEnabled(false) failed: %v", err)
+	}
+	if err := repo.ForceUpdateLastSeen("synapse-main", time.Now()); err != nil {
+		t.Fatalf("ForceUpdateLastSeen failed: %v", err)
+	}
+	dev, err := repo.GetByIdentifier("synapse-main")
+	if err != nil || dev == nil {
+		t.Fatalf("GetByIdentifier failed: %v", err)
+	}
+	if dev.Name != "Synapse Renamed" {
+		t.Errorf("Expected renamed device 'Synapse Renamed', got %q", dev.Name)
+	}
+	if dev.Enabled {
+		t.Fatal("Paused device must NOT be re-enabled automatically by ForceUpdateLastSeen")
+	}
+
+	// 3. RotateAPIKey replaces old key while remaining ACTIVE
+	if err := repo.SetDeviceEnabled("synapse-main", true); err != nil {
+		t.Fatalf("SetDeviceEnabled(true) failed: %v", err)
+	}
+	if err := repo.RotateAPIKey("synapse-main", "nox_live_rotated_key"); err != nil {
+		t.Fatalf("RotateAPIKey failed: %v", err)
+	}
+	if ok, _ := repo.ValidateToken("synapse-main", "nox_live_secret_main"); ok {
+		t.Fatal("Old API key should be invalid after rotation")
+	}
+	if ok, _ := repo.ValidateToken("synapse-main", "nox_live_rotated_key"); !ok {
+		t.Fatal("New rotated API key should validate")
+	}
+
+	// 4. Empty ApiKey must NEVER validate anymore (no legacy unauthenticated bypass)
+	if _, err := db.Exec(`INSERT INTO devices (name, identifier, api_key, status, enabled) VALUES ('Legacy', 'legacy-nokey', '', 'ACTIVE', 1);`); err != nil {
+		t.Fatalf("Failed inserting legacy test device: %v", err)
+	}
+	if ok, _ := repo.ValidateToken("legacy-nokey", ""); ok {
+		t.Fatal("SECURITY VIOLATION: device with empty api_key passed ValidateToken")
+	}
+}
+

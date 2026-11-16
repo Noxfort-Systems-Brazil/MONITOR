@@ -32,6 +32,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -75,8 +76,9 @@ func main() {
 		singleInstanceServer = lock
 	}
 
-	// 1. Initialize Logger & Audit Environment Security
+	// 1. Initialize Logger, Load .env & Audit Environment Security
 	log.Println("[BOOT] Starting Noxfort Monitor v2.0 (Event-Driven)...")
+	security.LoadDotEnv()
 	security.ValidateEnvironmentSecurity(".env")
 
 	// 2. Database Connection (PostgreSQL with auto-schema or SQLite fallback)
@@ -139,6 +141,7 @@ func main() {
 	telemetryRepo := storage.NewTelemetryRepository(db)
 	userRepo := storage.NewUserRepository(db)
 	auditRepo := storage.NewAuditRepository(db, activeDriver)
+	sessionStore := storage.NewDBSessionStore(db, activeDriver, security.SessionTTL)
 
 	// Register repositories for live database hot-reloading
 	dbManager.RegisterRepository(deviceRepo)
@@ -147,6 +150,7 @@ func main() {
 	dbManager.RegisterRepository(telemetryRepo)
 	dbManager.RegisterRepository(userRepo)
 	dbManager.RegisterRepository(auditRepo)
+	dbManager.RegisterRepository(sessionStore)
 
 	// 4. Initialize Core & Security Services
 	emailChan := monitor.NewEmailChannel()
@@ -159,7 +163,7 @@ func main() {
 	// High-throughput buffered batch telemetry writer (shields DB from I/O storms)
 	batchWriter := storage.NewBufferedTelemetryWriter(telemetryRepo, 50, 100*time.Millisecond)
 	stateManager := monitor.NewStateManager(batchWriter, deviceRepo, alertService)
-	secManager := security.NewSecurityManager(userRepo)
+	secManager := security.NewPersistentSecurityManager(userRepo, sessionStore)
 	secManager.SetAuditRepository(auditRepo)
 
 	if err := secManager.EnsureSuperuser(); err != nil {
@@ -181,10 +185,34 @@ func main() {
 	}
 	log.Printf("[BOOT] Connecting to MQTT Broker at %s...", brokerURL)
 	mqttClient := transportMqtt.NewClient(brokerURL, stateManager)
+	strictMQTT := !strings.EqualFold(strings.TrimSpace(os.Getenv("MONITOR_MQTT_STRICT")), "false")
+	mqttClient.SetDevicePolicy(deviceRepo, strictMQTT)
+	log.Printf("[BOOT] MQTT Zero-Trust Policy: strict=%v", strictMQTT)
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	sessionStore.StartCleanup(bgCtx, 1*time.Hour)
 	if err := mqttClient.Connect(); err != nil {
-		log.Fatalf("[FATAL] Could not connect to MQTT Broker: %v", err)
+		log.Printf("[WARN] Initial MQTT broker connection failed (%v). Retrying in background so UI and HTTP ingestion stay available...", err)
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-bgCtx.Done():
+					return
+				case <-ticker.C:
+					if mqttClient.IsConnected() {
+						return
+					}
+					if err := mqttClient.Connect(); err == nil {
+						log.Println("[INFO] MQTT Listener Active (Reconnected in background).")
+						return
+					}
+				}
+			}
+		}()
+	} else {
+		log.Println("[INFO] MQTT Listener Active (Listening for JSON events).")
 	}
-	log.Println("[INFO] MQTT Listener Active (Listening for JSON events).")
 
 	// 6. Initialize HTTP Server & Remote Access Manager (DuckDNS)
 	port := os.Getenv("PORT")
@@ -209,6 +237,24 @@ func main() {
 	backupDir := filepath.Join(dataDir, "backups")
 	backupManager := storage.NewBackupManager(dbManager, backupDir, 7)
 
+	retentionDays := 90
+	if raw := strings.TrimSpace(os.Getenv("MONITOR_RETENTION_DAYS")); raw != "" {
+		if parsed, convErr := strconv.Atoi(raw); convErr == nil {
+			retentionDays = parsed
+		}
+	}
+	storage.NewRetentionManager(dbManager, retentionDays).Start(bgCtx, 24*time.Hour)
+
+	backupIntervalHours := 24
+	if raw := strings.TrimSpace(os.Getenv("MONITOR_BACKUP_INTERVAL_HOURS")); raw != "" {
+		if parsed, convErr := strconv.Atoi(raw); convErr == nil {
+			backupIntervalHours = parsed
+		}
+	}
+	if backupIntervalHours > 0 {
+		backupManager.StartScheduledBackups(bgCtx, time.Duration(backupIntervalHours)*time.Hour)
+	}
+
 	httpServer := transportHttp.NewServer(
 		":"+port,
 		deviceRepo,
@@ -224,6 +270,12 @@ func main() {
 	)
 	httpServer.SetMQTTStatus(mqttClient)
 	httpServer.SetBackupService(backupManager)
+	httpServer.SetOnMQTTConfigChanged(func(newAddr string) {
+		log.Printf("[SETTINGS] Reconnecting MQTT broker to %s...", newAddr)
+		if err := mqttClient.Reconnect(newAddr); err != nil {
+			log.Printf("[WARN] MQTT reconnect to %s failed: %v", newAddr, err)
+		}
+	})
 
 	localIP := transportHttp.GetLocalIP()
 	serverURL := fmt.Sprintf("http://%s:%s", localIP, port)
@@ -246,8 +298,9 @@ func main() {
 	// 7. Graceful Shutdown Coordinator (guaranteed to execute at most once)
 	var shutdownOnce sync.Once
 	shutdown := func() {
-		shutdownOnce.Do(func() {
+			shutdownOnce.Do(func() {
 			log.Println("[SHUTDOWN] Stopping Noxfort Monitor...")
+			bgCancel()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			if singleInstanceServer != nil {
@@ -262,6 +315,9 @@ func main() {
 			engine.Stop()
 			mqttClient.Disconnect()
 			batchWriter.Close()
+			if err := alertService.Shutdown(shutdownCtx); err != nil {
+				log.Printf("[WARN] Timed out waiting for pending alerts to finish: %v", err)
+			}
 			if activeDB := dbManager.GetDB(); activeDB != nil {
 				_ = activeDB.Close()
 			}

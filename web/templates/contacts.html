@@ -3,7 +3,15 @@
     <h1 class="h2 text-white"><i class="fa-solid fa-users-gear me-2"></i><span data-i18n="contact_title">Response Team</span></h1>
 </div>
 
+{{ if and .CurrentUser (not .IsAdmin) }}
+<div class="alert alert-info bg-dark border-info text-light small d-flex align-items-center mb-4" role="alert">
+    <i class="fa-solid fa-eye text-info me-2"></i>
+    <span data-i18n="rbac_operator_readonly_notice">Modo somente leitura (Operador): apenas contas com perfil Administrador podem cadastrar, editar ou excluir recursos.</span>
+</div>
+{{ end }}
+
 <div class="row">
+    {{ if .IsAdmin }}
     <div class="col-md-4 mb-4">
         <div class="card bg-dark border-secondary text-white shadow-sm">
             <div class="card-header border-secondary">
@@ -56,8 +64,9 @@
             </div>
         </div>
     </div>
+    {{ end }}
 
-    <div class="col-md-8">
+    <div class="{{ if .IsAdmin }}col-md-8{{ else }}col-12{{ end }}">
         <div class="card bg-dark border-secondary shadow-sm">
             <div class="card-header border-secondary text-white d-flex justify-content-between align-items-center">
                 <span><i class="fa-solid fa-address-book me-2"></i> <span data-i18n="contact_directory">Directory</span></span>
@@ -71,7 +80,9 @@
                                 <th class="ps-4" data-i18n="contact_col_name">Name / Role</th>
                                 <th data-i18n="contact_col_email">Contact Info</th>
                                 <th class="text-center"><i class="fa-brands fa-telegram text-info me-1"></i><span data-i18n="contact_col_telegram">Telegram</span></th>
+                                {{ if .IsAdmin }}
                                 <th class="text-end pe-4" data-i18n="dev_col_actions">Actions</th>
+                                {{ end }}
                             </tr>
                         </thead>
                         <tbody>
@@ -102,6 +113,7 @@
                                         <span class="text-muted small">—</span>
                                     {{ end }}
                                 </td>
+                                {{ if $.IsAdmin }}
                                 <td class="text-end pe-4 text-nowrap">
                                     <button type="button" class="btn btn-outline-warning btn-sm me-1 btn-edit-contact"
                                             data-id="{{ .ID }}"
@@ -119,10 +131,11 @@
                                         </button>
                                     </form>
                                 </td>
+                                {{ end }}
                             </tr>
                             {{ else }}
                             <tr>
-                                <td colspan="4" class="text-center py-5 text-muted" data-i18n="contact_empty">
+                                <td colspan="{{ if .IsAdmin }}4{{ else }}3{{ end }}" class="text-center py-5 text-muted" data-i18n="contact_empty">
                                     <i class="fa-solid fa-user-slash fa-2x mb-3 opacity-50"></i><br>
                                     No contacts registered.<br>
                                     Add a team member to receive system alerts.
@@ -137,6 +150,7 @@
     </div>
 </div>
 
+{{ if .IsAdmin }}
 <!-- Edit Contact Modal -->
 <div class="modal fade" id="editContactModal" tabindex="-1" aria-labelledby="editContactModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -196,6 +210,7 @@
         </div>
     </div>
 </div>
+{{ end }}
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {

@@ -21,8 +21,10 @@
 package monitor
 
 import (
+	"context"
 	"errors"
 	"net/smtp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,5 +238,132 @@ func TestAlertService_TriggerAlert_RepositoryErrors(t *testing.T) {
 	serviceDefault := NewAlertService(&mockContactRepoForAlerts{}, &mockSettingsRepoForAlerts{})
 	if serviceDefault == nil {
 		t.Fatalf("Expected non-nil default AlertService")
+	}
+}
+
+type flakyNotificationChannel struct {
+	mu       sync.Mutex
+	attempts int
+	failNTimes int
+}
+
+func (f *flakyNotificationChannel) Name() string { return "flaky" }
+func (f *flakyNotificationChannel) Recipient(c *domain.Contact) string {
+	if c == nil {
+		return ""
+	}
+	return c.Email
+}
+func (f *flakyNotificationChannel) Send(_ *domain.Settings, _ *domain.Contact, _ string, _ *domain.IncomingEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attempts++
+	if f.attempts <= f.failNTimes {
+		return errors.New("temporary network timeout")
+	}
+	return nil
+}
+
+type recordingAuditRepo struct {
+	mu        sync.Mutex
+	alertLogs []domain.AlertDispatchLog
+}
+
+func (r *recordingAuditRepo) SaveSecurityAuditLog(_ *domain.SecurityAuditLog) error { return nil }
+func (r *recordingAuditRepo) GetRecentSecurityAuditLogs(_ int) ([]domain.SecurityAuditLog, error) {
+	return nil, nil
+}
+func (r *recordingAuditRepo) SaveAlertDispatchLog(l *domain.AlertDispatchLog) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if l != nil {
+		r.alertLogs = append(r.alertLogs, *l)
+	}
+	return nil
+}
+func (r *recordingAuditRepo) GetRecentAlertDispatchLogs(_ int) ([]domain.AlertDispatchLog, error) {
+	return nil, nil
+}
+func (r *recordingAuditRepo) SaveDeviceStateTransition(_ *domain.DeviceStateTransition) error {
+	return nil
+}
+func (r *recordingAuditRepo) GetRecentDeviceStateTransitions(_ int) ([]domain.DeviceStateTransition, error) {
+	return nil, nil
+}
+
+func TestAlertService_RetryShutdownAndTelemetryLink(t *testing.T) {
+	flaky := &flakyNotificationChannel{failNTimes: 2}
+	audit := &recordingAuditRepo{}
+
+	svc := NewAlertServiceWithChannels(
+		&mockContactRepoForAlerts{contacts: []domain.Contact{{ID: 1, Name: "OpsAdmin", Email: "ops@noxfort.com", Role: "admin", Enabled: true}}},
+		&mockSettingsRepoForAlerts{settings: &domain.Settings{Enabled: true}},
+		flaky,
+	)
+	svc.SetAuditRepository(audit)
+	svc.SetRetryDelays(1*time.Millisecond, 1*time.Millisecond)
+
+	telID := int64(4242)
+	svc.TriggerAlertWithTelemetryID("NODE-9", &domain.IncomingEvent{
+		Level:      domain.LevelCritical,
+		Category:   domain.CategoryHardware,
+		Message:    "Transient failure recovery",
+		OccurredAt: time.Now(),
+	}, &telID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := svc.Shutdown(ctx); err != nil {
+		t.Fatalf("Expected graceful Shutdown before timeout, got %v", err)
+	}
+
+	flaky.mu.Lock()
+	attempts := flaky.attempts
+	flaky.mu.Unlock()
+	if attempts != 3 {
+		t.Fatalf("Expected 3 total dispatch attempts (1 + 2 retries), got %d", attempts)
+	}
+
+	audit.mu.Lock()
+	defer audit.mu.Unlock()
+	if len(audit.alertLogs) != 1 || audit.alertLogs[0].Status != "SENT" {
+		t.Fatalf("Expected 1 SENT alert dispatch log, got %+v", audit.alertLogs)
+	}
+	if audit.alertLogs[0].TelemetryID == nil || *audit.alertLogs[0].TelemetryID != 4242 {
+		t.Fatalf("Expected TelemetryID=4242 linked in alert dispatch log, got %+v", audit.alertLogs[0].TelemetryID)
+	}
+}
+
+func TestEmailChannel_SanitizesCRLFHeaders(t *testing.T) {
+	var capturedMsg string
+	emailChan := NewEmailChannelWithSender(func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		capturedMsg = string(msg)
+		return nil
+	})
+	settings := &domain.Settings{
+		SMTPHost: "smtp.local",
+		SMTPPort: 587,
+		SMTPFrom: "alerts@local\r\nBcc: evil@attacker.com",
+		Enabled:  true,
+	}
+	contact := &domain.Contact{Email: "ops@local\r\nX-Inject: bad"}
+	if err := emailChan.Send(settings, contact, "PLC-1", &domain.IncomingEvent{
+		Level:      domain.LevelCritical,
+		Category:   domain.CategoryHardware,
+		Message:    "Overheat\r\nBcc: evil2@attacker.com",
+		OccurredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+
+	headerSection := strings.SplitN(capturedMsg, "\r\n\r\n", 2)[0]
+	for _, line := range strings.Split(headerSection, "\r\n") {
+		lowerLine := strings.ToLower(strings.TrimSpace(line))
+		if strings.HasPrefix(lowerLine, "bcc:") || strings.HasPrefix(lowerLine, "x-inject:") {
+			t.Fatalf("SECURITY VIOLATION: CRLF SMTP header injection escaped onto new header line:\n%s", headerSection)
+		}
+	}
+	if strings.Contains(headerSection, "\nX-Inject:") || strings.Contains(headerSection, "\nBcc:") {
+		t.Fatalf("SECURITY VIOLATION: unexpected injected newline in header section:\n%s", headerSection)
 	}
 }

@@ -1,7 +1,10 @@
 {{define "content"}}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2" data-i18n="dash_title">Systems Overview</h1>
-    <div class="btn-toolbar mb-2 mb-md-0">
+    <div class="btn-toolbar mb-2 mb-md-0 align-items-center gap-2">
+        <button type="button" id="btn-toggle-live" class="btn btn-sm btn-outline-success">
+            <i class="fa-solid fa-circle-play me-1"></i> Live (10s)
+        </button>
         <div class="text-muted small">
             <span data-i18n="dash_last_update">Last Update</span>:
             <time id="dash-now" datetime="{{.Now}}">{{.Now}}</time>
@@ -20,7 +23,7 @@
                 <th data-i18n="dev_col_status">Status</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="dash-devices-body">
             {{range .Devices}}
             <tr class="{{.RowClass}}">
                 <td class="fw-bold text-white">{{.Name}}</td>
@@ -29,11 +32,7 @@
                 </td>
                 <td class="text-white">{{.LastSeen}}</td>
                 <td>
-                    {{if eq .Status "ONLINE"}}
-                        <span class="badge bg-success" data-i18n="dash_status_ok"><i class="bi bi-check-circle me-1"></i> ONLINE</span>
-                    {{else}}
-                        <span class="badge bg-danger" data-i18n="dash_status_crit"><i class="bi bi-exclamation-octagon me-1"></i> OFFLINE</span>
-                    {{end}}
+                    <span class="badge {{.BadgeClass}}">{{.Status}}</span>
                 </td>
             </tr>
             {{else}}
@@ -58,7 +57,7 @@
                 <th scope="col" data-i18n="dash_col_message">Message</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="dash-incidents-body">
             {{range .RecentIncidents}}
             <tr>
                 <td class="text-secondary small text-nowrap">
@@ -87,4 +86,120 @@
         </tbody>
     </table>
 </div>
+
+<script>
+(function() {
+    var liveEnabled = true;
+    var btnToggle = document.getElementById('btn-toggle-live');
+    var devicesBody = document.getElementById('dash-devices-body');
+    var incidentsBody = document.getElementById('dash-incidents-body');
+    var dashNow = document.getElementById('dash-now');
+
+    function renderDevices(list) {
+        if (!devicesBody) return;
+        devicesBody.replaceChildren();
+        if (!list || list.length === 0) {
+            var emptyTr = document.createElement('tr');
+            var emptyTd = document.createElement('td');
+            emptyTd.colSpan = 4;
+            emptyTd.className = 'text-center py-4 text-muted';
+            emptyTd.textContent = 'No devices registered. Go to Devices to add a system.';
+            emptyTr.appendChild(emptyTd);
+            devicesBody.appendChild(emptyTr);
+            return;
+        }
+        list.forEach(function(d) {
+            var tr = document.createElement('tr');
+            tr.className = d.row_class || '';
+
+            var tdName = document.createElement('td');
+            tdName.className = 'fw-bold text-white';
+            tdName.textContent = d.name || '';
+
+            var tdId = document.createElement('td');
+            var code = document.createElement('code');
+            code.className = 'text-white bg-dark px-2 rounded border border-light';
+            code.textContent = d.identifier || '';
+            tdId.appendChild(code);
+
+            var tdSeen = document.createElement('td');
+            tdSeen.className = 'text-white';
+            tdSeen.textContent = d.last_seen || '-';
+
+            var tdStatus = document.createElement('td');
+            var badge = document.createElement('span');
+            badge.className = 'badge ' + (d.badge_class || 'bg-secondary');
+            badge.textContent = d.status || 'UNKNOWN';
+            tdStatus.appendChild(badge);
+
+            tr.append(tdName, tdId, tdSeen, tdStatus);
+            devicesBody.appendChild(tr);
+        });
+    }
+
+    function renderIncidents(list) {
+        if (!incidentsBody) return;
+        incidentsBody.replaceChildren();
+        if (!list || list.length === 0) {
+            var emptyTr = document.createElement('tr');
+            var emptyTd = document.createElement('td');
+            emptyTd.colSpan = 4;
+            emptyTd.className = 'text-center py-5 text-muted';
+            emptyTd.textContent = 'No recent incidents recorded.';
+            emptyTr.appendChild(emptyTd);
+            incidentsBody.appendChild(emptyTr);
+            return;
+        }
+        list.forEach(function(inc) {
+            var tr = document.createElement('tr');
+
+            var tdTime = document.createElement('td');
+            tdTime.className = 'text-secondary small text-nowrap';
+            tdTime.textContent = inc.time || '';
+
+            var tdLvl = document.createElement('td');
+            var badge = document.createElement('span');
+            badge.className = 'badge w-100 ' + (inc.level === 'CRITICAL' ? 'bg-danger' : (inc.level === 'WARNING' ? 'bg-warning text-dark' : 'bg-secondary'));
+            badge.textContent = inc.level || '';
+            tdLvl.appendChild(badge);
+
+            var tdOrig = document.createElement('td');
+            tdOrig.className = 'fw-bold font-monospace';
+            tdOrig.textContent = inc.origin || '';
+
+            var tdMsg = document.createElement('td');
+            tdMsg.textContent = inc.message || '';
+
+            tr.append(tdTime, tdLvl, tdOrig, tdMsg);
+            incidentsBody.appendChild(tr);
+        });
+    }
+
+    async function refreshSummary() {
+        if (!liveEnabled) return;
+        try {
+            var res = await fetch('/api/dashboard/summary', { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) return;
+            var data = await res.json();
+            if (dashNow && data.now) dashNow.textContent = data.now;
+            renderDevices(data.devices);
+            renderIncidents(data.recent_incidents);
+        } catch (_) {}
+    }
+
+    if (btnToggle) {
+        btnToggle.addEventListener('click', function() {
+            liveEnabled = !liveEnabled;
+            btnToggle.className = liveEnabled ? 'btn btn-sm btn-outline-success' : 'btn btn-sm btn-outline-secondary';
+            btnToggle.innerHTML = liveEnabled
+                ? '<i class="fa-solid fa-circle-play me-1"></i> Live (10s)'
+                : '<i class="fa-solid fa-circle-pause me-1"></i> Pausado';
+            if (liveEnabled) refreshSummary();
+        });
+    }
+
+    var timer = setInterval(refreshSummary, 10000);
+    window.addEventListener('beforeunload', function() { clearInterval(timer); });
+})();
+</script>
 {{end}}

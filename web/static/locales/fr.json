@@ -278,5 +278,12 @@
   "settings_reconfigure_confirm": "Voulez-vous vraiment reconfigurer le système d'alerte ?",
   "settings_email_sending": "Envoi...",
   "settings_email_test_success": "E-mail de test envoyé avec succès !",
-  "settings_telegram_prompt_id": "Entrez votre Chat ID Telegram pour recevoir le message de test :\n(Envoyez un message à @userinfobot sur Telegram pour obtenir le vôtre)"
+  "settings_telegram_prompt_id": "Entrez votre Chat ID Telegram pour recevoir le message de test :\n(Envoyez un message à @userinfobot sur Telegram pour obtenir le vôtre)",
+  "rbac_badge_readonly": "Lecture seule",
+  "rbac_operator_readonly_notice": "Mode lecture seule (Opérateur) : seuls les comptes Administrateur peuvent créer, modifier ou supprimer des ressources.",
+  "rbac_admin_only_section": "Configuration réservée à l'Administrateur.",
+  "forbidden_title": "Accès Restreint (Lecture seule)",
+  "forbidden_operator_hint": "Votre compte utilise le profil Opérateur (lecture seule). Seuls les comptes Administrateur peuvent créer, modifier ou supprimer des ressources du Moniteur.",
+  "forbidden_btn_back": "Retour",
+  "forbidden_btn_dashboard": "Retour au Tableau de bord"
 }

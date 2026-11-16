@@ -109,6 +109,16 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    async function extractResponseMessage(response) {
+        const text = await response.text();
+        try {
+            const parsed = JSON.parse(text);
+            return parsed.error || parsed.message || text;
+        } catch (_) {
+            return text;
+        }
+    }
+
     // --- 3. Test Email Connection ---
     const btnTest = document.getElementById('btn-test-existing');
 
@@ -122,9 +132,12 @@ document.addEventListener('DOMContentLoaded', function () {
             feedbackAlert.classList.add('d-none');
             feedbackAlert.classList.remove('alert-success', 'alert-danger');
 
-            fetch('/settings/test', { method: 'POST' })
+            fetch('/settings/test', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' }
+            })
                 .then(async response => {
-                    const text = await response.text();
+                    const msg = await extractResponseMessage(response);
                     feedbackAlert.classList.remove('d-none');
                     if (response.ok) {
                         const successText = window._t ? window._t('settings_email_test_success', 'Test email sent correctly.') : 'Test email sent correctly.';
@@ -132,7 +145,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         feedbackAlert.innerHTML = `<i class="fa-solid fa-check-circle me-2"></i><strong>Success!</strong> ${successText}`;
                     } else {
                         feedbackAlert.className = 'alert alert-danger shadow-sm mb-4';
-                        feedbackAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Failed:</strong> ' + text;
+                        feedbackAlert.innerHTML = '<i class="fa-solid fa-triangle-exclamation me-2"></i><strong>Failed:</strong> <span class="err-msg"></span>';
+                        const errSpan = feedbackAlert.querySelector('.err-msg');
+                        if (errSpan) errSpan.textContent = msg;
                     }
                 })
                 .catch(error => {
@@ -191,8 +206,12 @@ document.addEventListener('DOMContentLoaded', function () {
             try {
                 const fd = new FormData();
                 fd.append('chat_id', chatID.trim());
-                const res = await fetch('/settings/test-telegram', { method: 'POST', body: fd });
-                const text = await res.text();
+                const res = await fetch('/settings/test-telegram', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: fd
+                });
+                const text = await extractResponseMessage(res);
                 if (res.ok) {
                     showTelegramAlert('✅ ' + text, 'success');
                 } else {

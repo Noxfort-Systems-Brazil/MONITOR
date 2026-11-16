@@ -1,112 +1,54 @@
-# 🚀 Guia de Deploy em Produção
+# Noxfort Monitor — Guia de Implantação e Operação
 
-Este documento fornece instruções passo a passo para a implantação do **Noxfort Monitor™ v2.0** em ambientes corporativos e industriais, cobrindo o serviço Systemd headless, proxy reverso NGINX com terminação SSL e instalação via pacote Debian (`.deb`).
-
-⬅️ [Central de Documentação](../README.md) | 🏛️ [Arquitetura](architecture.md) | 🖥️ [App Desktop](desktop_app.md)
+Este guia apresenta as variáveis de ambiente atuais, orquestração com Docker Compose, configuração de proxy reverso, backups automatizados e métricas de produção.
 
 ---
 
-## 1. Instalação via Pacote Debian (`.deb`)
+## 1. Configuração por Ambiente (`.env`)
 
-```bash
-# Compilar o instalador .deb (gerado na raiz como noxfort-monitor_2.0.1_amd64.deb)
-make deb
+O arquivo legado `configs/config.yaml` foi removido. Variáveis de inicialização são carregadas do `.env` via `LoadDotEnv()` (consulte `.env.example`), enquanto parâmetros operacionais dinâmicos (URL do broker MQTT, alertas, túneis) ficam persistidos na tabela SQL `settings`.
 
-# Opção A: Instalação automática via Makefile
-make install-deb
-
-# Opção B: Instalação via dpkg no servidor Ubuntu/Debian
-sudo dpkg -i noxfort-monitor_2.0.1_amd64.deb
-sudo apt-get install -f
-
-# Para desinstalar:
-make uninstall-deb
-```
-
-Instala os binários em `/opt/noxfort-monitor/`, cria o link simbólico `/usr/local/bin/noxfort-monitor`, registra os atalhos de sistema e habilita o serviço Mosquitto MQTT.
+| Variável | Padrão | Descrição |
+| :--- | :--- | :--- |
+| `MONITOR_MQTT_STRICT` | `true` | Descarta telemetria MQTT (`noxfort/telemetry/#`) de dispositivos não cadastrados ou `PAUSED`. |
+| `TRUSTED_PROXIES` | *(vazio)* | Lista separada por vírgulas de CIDRs/IPs confiáveis para cabeçalhos `X-Real-IP`, `X-Forwarded-For` e `X-Forwarded-Proto`. |
+| `MONITOR_USE_HTTPS` | `false` | Habilita cookies `Secure` e detecção HTTPS atrás de terminadores TLS. |
+| `MONITOR_RETENTION_DAYS` | `90` | Prazo em dias para o `RetentionManager` limpar `telemetry`, logs de auditoria, alertas e transições (a cada 24h). |
+| `MONITOR_BACKUP_INTERVAL_HOURS` | `24` | Intervalo de backups quentes agendados pelo `BackupManager` (retém até `7` arquivos). |
+| `MONITOR_DB_DRIVER` / `MONITOR_DB_*` | `sqlite` | Configuração opcional de bootstrap direto com PostgreSQL. |
 
 ---
 
-## 2. Serviço Systemd Dedicado (Modo Headless)
+## 2. Docker Compose e Modo Headless
 
-Recomendado para servidores em nuvem e instâncias sem monitor:
-
-### 2.1 Arquivo de Unidade (`/etc/systemd/system/noxfort-monitor.service`)
-```ini
-[Unit]
-Description=Noxfort Monitor Server (Modo Headless)
-After=network.target postgresql.service mosquitto.service
-
-[Service]
-Type=simple
-User=noxfort
-Group=noxfort
-ExecStart=/usr/local/bin/noxfort-monitor --headless
-WorkingDirectory=/home/noxfort
-
-Environment="PORT=22100"
-EnvironmentFile=-/home/noxfort/.env
-
-Restart=always
-RestartSec=5s
-LimitNOFILE=65535
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 2.2 Ativação e Monitoramento
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now noxfort-monitor
-sudo journalctl -u noxfort-monitor -f
+cp .env.example .env
+docker compose up -d --build
 ```
+
+* Executa o binário com `--headless` junto ao Eclipse Mosquitto (`mosquitto/config/mosquitto.conf`) e PostgreSQL opcional (`docker-compose.yml`).
+* Execute `./scripts/setup_mqtt_auth.sh` para configurar autenticação no Mosquitto antes de expor a porta MQTT em rede.
 
 ---
 
-## 3. Proxy Reverso e Gateway HTTPS (Caddy ou NGINX)
+## 3. Exemplo de Proxy Reverso NGINX
 
-### 3.1 Opção A: Caddy Server com DuckDNS (Recomendado)
-O ecossistema disponibiliza gateway Caddy em contêiner com validação automática de certificados via **DNS-01 ACME**:
-```bash
-make caddy-build
-make services-start
-```
-Consulte o guia completo em [Integração Caddy & DuckDNS](caddy_integration.md).
+Ao usar NGINX em vez de `caddy/Caddyfile`, garanta o repasse dos cabeçalhos de proxy e inclua o IP do NGINX em `TRUSTED_PROXIES`:
 
-### 3.2 Opção B: NGINX para Ingestão de Telemetria
 ```nginx
-server {
-    listen 80;
-    server_name monitor.noxfort.internal;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name monitor.noxfort.internal;
-
-    ssl_certificate /etc/letsencrypt/live/monitor.noxfort.internal/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/monitor.noxfort.internal/privkey.pem;
-
-    # Encaminha telemetria de sensores e agentes IoT
-    location /api/telemetry {
-        proxy_pass http://127.0.0.1:22100;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Acessos web ao dashboard retornam 403 Forbidden por design de segurança
-    location / {
-        proxy_pass http://127.0.0.1:22100;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+location / {
+    proxy_pass http://127.0.0.1:22100;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
-> [!NOTE]
-> O acesso de navegadores ao painel web está desativado no servidor HTTP (retornando 403 Forbidden). A operação da interface ocorre exclusivamente no aplicativo desktop nativo.
+
+---
+
+## 4. Backups, Restauração, Retenção e Métricas
+
+* **Backups Agendados e Sob Demanda**: `BackupManager` cria snapshots atômicos (`VACUUM INTO` no SQLite; `pg_dump -F c` no PostgreSQL), mantém até 7 cópias e oferece `/api/settings/database/backups/download` + `/api/settings/database/restore` (`PRAGMA quick_check` / `pg_restore`).
+* **Retenção Automática**: `RetentionManager` limpa dados expirados a cada 24h em `telemetry`, `alert_dispatch_logs`, `security_audit_logs` e `device_state_transitions`.
+* **Coleta Prometheus (`GET /metrics`)**: Expõe uptime, goroutines, heap, `noxfort_db_status`, `noxfort_db_latency_ms`, `noxfort_mqtt_connected`, `noxfort_devices_total`, `noxfort_devices_by_status`, `noxfort_telemetry_buffer_depth`, `noxfort_telemetry_ingested_total`, `noxfort_telemetry_rejected_total` e `noxfort_alerts_dispatched_total`.

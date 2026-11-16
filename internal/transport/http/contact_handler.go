@@ -30,12 +30,18 @@ import (
 
 // ContactHandler manages the response team list.
 type ContactHandler struct {
-	repo domain.ContactRepository
+	repo      domain.ContactRepository
+	auditRepo domain.AuditRepository
 }
 
 // NewContactHandler creates the handler with dependencies.
 func NewContactHandler(r domain.ContactRepository) *ContactHandler {
 	return &ContactHandler{repo: r}
+}
+
+// SetAuditRepository attaches an AuditRepository for recording contact mutations.
+func (h *ContactHandler) SetAuditRepository(repo domain.AuditRepository) {
+	h.auditRepo = repo
 }
 
 // ServePage renders the contacts management page.
@@ -55,7 +61,7 @@ func (h *ContactHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Render Template (Layout + Contacts)
-	if err := RenderPage(w, "web/templates/contacts.html", data); err != nil {
+	if err := RenderPageWithRequest(w, r, "web/templates/contacts.html", data); err != nil {
 		log.Printf("[CONTACTS] Template error: %v", err)
 		http.Error(w, "Template Error", http.StatusInternalServerError)
 		return
@@ -86,6 +92,7 @@ func (h *ContactHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logSecurityAuditEvent(h.auditRepo, r, "CONTACT_CREATED", "Contato adicionado: "+contact.Name+" ("+contact.Role+")")
 	Redirect(w, r, "/contacts", http.StatusSeeOther)
 }
 
@@ -112,6 +119,7 @@ func (h *ContactHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logSecurityAuditEvent(h.auditRepo, r, "CONTACT_DELETED", "Contato removido ID "+strconv.FormatInt(id, 10))
 	Redirect(w, r, "/contacts", http.StatusSeeOther)
 }
 
@@ -145,5 +153,6 @@ func (h *ContactHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logSecurityAuditEvent(h.auditRepo, r, "CONTACT_UPDATED", "Contato atualizado: "+contact.Name+" (ID "+strconv.FormatInt(contact.ID, 10)+")")
 	Redirect(w, r, "/contacts", http.StatusSeeOther)
 }

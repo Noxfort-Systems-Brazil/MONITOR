@@ -3,6 +3,13 @@
     <h1 class="h2 text-warning"><i class="fa-solid fa-gears me-2"></i><span data-i18n="settings_title">System Settings</span></h1>
 </div>
 
+{{ if and .CurrentUser (not .IsAdmin) }}
+<div class="alert alert-info bg-dark border-info text-light small d-flex align-items-center mb-4" role="alert">
+    <i class="fa-solid fa-eye text-info me-2"></i>
+    <span data-i18n="rbac_operator_readonly_notice">Modo somente leitura (Operador): apenas contas com perfil Administrador podem cadastrar, editar ou excluir recursos.</span>
+</div>
+{{ end }}
+
 <div class="row justify-content-center">
     <div class="col-md-7 col-lg-6">
         {{/* ─── 1. SMTP / Email Configuration ─── */}}
@@ -10,6 +17,36 @@
 
         {{/* ─── 2. Telegram Bot Configuration ─── */}}
         {{ template "settings_telegram" . }}
+
+        {{/* ─── 3. MQTT Broker Address ─── */}}
+        <div class="card bg-dark border-secondary text-light shadow-lg mt-4">
+            <div class="card-header border-secondary bg-black bg-opacity-25 d-flex justify-content-between align-items-center py-3">
+                <h5 class="mb-0"><i class="fa-solid fa-tower-broadcast me-2 text-warning"></i><span>Broker MQTT</span></h5>
+                <span class="badge bg-black border border-secondary text-muted font-monospace small">{{ .Settings.MqttAddress }}</span>
+            </div>
+            <div class="card-body p-4">
+                {{ if .IsAdmin }}
+                <form action="/settings/save" method="POST" id="mqttForm">
+                    <input type="hidden" name="form_section" value="mqtt">
+                    <div class="mb-3">
+                        <label for="mqtt_address" class="form-label small text-muted fw-bold">ENDEREÇO DO BROKER (TCP)</label>
+                        <input type="text" class="form-control bg-black text-white border-secondary font-monospace"
+                               id="mqtt_address" name="mqtt_address"
+                               placeholder="tcp://127.0.0.1:1883"
+                               value="{{ .Settings.MqttAddress }}" required>
+                        <small class="text-muted">Ao salvar, o Monitor reconecta automaticamente ao broker configurado.</small>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-outline-warning fw-bold py-2">
+                            <i class="fa-solid fa-plug-circle-bolt me-2"></i> Salvar e Reconectar MQTT
+                        </button>
+                    </div>
+                </form>
+                {{ else }}
+                <p class="small text-muted mb-0">Broker configurado: <code class="text-info">{{ .Settings.MqttAddress }}</code></p>
+                {{ end }}
+            </div>
+        </div>
     </div>
 </div>
 

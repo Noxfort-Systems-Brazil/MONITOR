@@ -1,107 +1,56 @@
-# 🛡️ Caddy Reverse Proxy & DuckDNS (Automatic HTTPS): Noxfort Monitor™
+# Noxfort Monitor — Caddy Reverse Proxy Integration
 
-This document outlines the architecture, deployment, and operational procedures for **Caddy Server** integrated with **DuckDNS** in **Noxfort Monitor™ v2.0**. This configuration provides enterprise-grade, automatic TLS/SSL termination via the **DNS-01 ACME challenge**, eliminating plaintext transmissions across the WAN and exposing standard ports (`80`, `443`, and `WSS`).
-
-⬅️ [Central Hub](README.md) | 🌐 [Remote Access](remote_access.md) | 🚀 [Deployment](deployment.md) | 📡 [API Reference](api_reference.md)
+Deploying Noxfort Monitor behind Caddy (`caddy/Caddyfile`) provides automatic TLS certificates (ACME / Let's Encrypt), clean HTTPS termination for browser operators and edge telemetry devices, and verified proxy header forwarding.
 
 ---
 
-## 1. Architectural Overview
+## 1. Proxy Header Forwarding & Trusted Proxies
 
-In industrial observability and telemetry networks, remote edge nodes (such as **Synapse**, **Carina**, or external sensors) dispatch telemetry over public networks. Exposing raw HTTP on non-standard ports (e.g., `:22100`) introduces security risks and frequently conflicts with corporate outbound firewalls.
+In `caddy/Caddyfile`, Caddy forwards `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto` upstream to Noxfort Monitor.
 
-```mermaid
-graph LR
-    subgraph "Public Internet / WAN"
-        Carina[Carina Agent]
-        Synapse[Synapse Agent]
-        Browser[Operator Browser]
-    end
+To honor those headers safely without allowing header spoofing from untrusted clients:
 
-    subgraph "Caddy Edge Gateway (Docker)"
-        Caddy[Caddy Server :80/:443]
-        LetEncrypt[Let's Encrypt / ZeroSSL]
-        DuckAPI[DuckDNS DNS-01 API]
-    end
+1. Configure `TRUSTED_PROXIES` in your environment (e.g., `TRUSTED_PROXIES=127.0.0.1/32,172.16.0.0/12`).
+2. Set `MONITOR_USE_HTTPS=true` when serving externally behind TLS.
 
-    subgraph "Local Host Services"
-        Monitor[Noxfort Monitor Core :22100]
-        Mosquitto[Mosquitto MQTT :9001 WSS]
-    end
-
-    Carina -->|HTTPS POST :443| Caddy
-    Synapse -->|HTTPS POST :443| Caddy
-    Browser -->|HTTPS GET :443| Caddy
-
-    Caddy -.->|DNS-01 ACME Challenge| DuckAPI
-    DuckAPI -.->|Validates Domain Record| LetEncrypt
-
-    Caddy -->|HTTP Reverse Proxy| Monitor
-    Caddy -->|WSS Proxy /mqtt| Mosquitto
-```
-
-### Key Advantages:
-1. **Zero-Configuration HTTPS**: Caddy automatically requests and renews valid TLS certificates from Let's Encrypt / ZeroSSL.
-2. **DNS-01 ACME Validation**: Unlike HTTP-01 challenges, DNS-01 does **not** require inbound port 80 to be open to issue or renew certificates. The challenge is fulfilled via outbound API calls to DuckDNS.
-3. **Encrypted WebSockets (WSS)**: Enables secure MQTT-over-WebSockets for web dashboards via `wss://your-domain.duckdns.org/mqtt`.
-4. **Standard Web Ports**: Standardizes traffic on port 443, eliminating the need to expose port `:22100` publicly.
+When configured:
+* `ExtractClientIP` attributes failed logins, `LoginAttemptTracker` lockouts, and `SecurityAuditLog` entries (`ip_address`) to the real downstream client IP.
+* `IsHTTPSRequest` detects HTTPS termination and issues cookies with the `Secure` attribute.
 
 ---
 
-## 2. Directory Structure
+## 2. Example `Caddyfile` Site Block
 
-The Caddy subsystem is contained within the `caddy/` directory:
-
-```text
-MONITOR_CORE/
-├── caddy/
-│   ├── Dockerfile         # Multi-stage build with github.com/caddy-dns/duckdns
-│   └── Caddyfile          # Reverse proxy and TLS rules
-├── docker-compose.yml     # Orchestration for Mosquitto and Caddy
-└── .env                   # Credentials (DuckDNS token, domain, email)
+```caddyfile
+monitor.example.com {
+    reverse_proxy 127.0.0.1:22100 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
 ```
 
 ---
 
-## 3. Configuration & Setup
+## 3. Testing Edge Ingestion Through Caddy (HTTPS)
 
-### 3.1 Configure Environment Variables (`.env`)
-Configure your DuckDNS details in `.env`:
-
-```env
-# DuckDNS Subdomain (e.g. 'my-monitor' for my-monitor.duckdns.org)
-DUCKDNS_DOMAIN=your-subdomain
-
-# DuckDNS Account API Token (from duckdns.org)
-DUCKDNS_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-
-# Email address for Let's Encrypt expiration notifications
-ACME_EMAIL=admin@your-company.com
-
-# Enable HTTPS telemetry URL formatting in Noxfort Monitor
-MONITOR_USE_HTTPS=true
-```
-
-### 3.2 Build the Caddy Container
-Compile the custom Caddy image equipped with the `caddy-dns/duckdns` plugin:
+1. **Request Zero-Trust Pairing**:
 
 ```bash
-make caddy-build
+curl -X POST https://monitor.example.com/api/pair \
+  -H "Content-Type: application/json" \
+  -d '{"origin":"edge-01","name":"Boiler Sensor 01"}'
 ```
 
-### 3.3 Start the Edge Services
-Start Mosquitto and Caddy in the background:
+Expected response: `202 Accepted` (without an API key). An `ADMIN` opens `/devices`, approves the pending device, and copies the temporary 5-minute TTL `nox_live_` token.
+
+2. **Publish Authenticated Telemetry**:
 
 ```bash
-make services-start
-```
-
-To view live certificate issuance and access logs:
-```bash
-make services-logs
-```
-
-To stop the services:
-```bash
-make services-stop
+curl -X POST https://monitor.example.com/api/telemetry \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_your_copied_token" \
+  -H "X-Device-Origin: edge-01" \
+  -d '{"category":"HARDWARE","origin":"edge-01","level":"INFO","message":"System OK (temp 41.2C)","occurred_at":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}'
 ```

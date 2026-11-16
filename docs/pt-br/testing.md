@@ -1,104 +1,61 @@
-# 🧪 Testes e Garantia de Qualidade (QA)
+# Noxfort Monitor — Guia de Testes e Verificação
 
-Este documento especifica os fluxos de validação do **Noxfort Monitor™ v2.0**, incluindo testes unitários automatizados com mocks de repositório e verificação manual ponta a ponta (E2E) via MQTT e HTTP REST.
-
-⬅️ [Central de Documentação](../README.md) | 🏛️ [Arquitetura](architecture.md) | 📡 [API](api_reference.md)
+O Noxfort Monitor valida o backend em Go, os scripts de interface frontend e os fluxos MQTT/HTTP ao vivo utilizando alvos padronizados no `Makefile`.
 
 ---
 
-## 1. Suíte de Testes Automatizados
+## 1. Suítes Automatizadas de Teste
 
-Para executar os testes do sistema completo (Backend em Go + Frontend em Vitest):
+Execute a suíte completa (backend Go + frontend Vitest):
+
 ```bash
-# Executa todos os testes (Go + Vitest)
 make test
-
-# Executa testes unitários do Backend Go (com detecção de concorrência)
-make test-backend
-
-# Executa testes do Frontend JavaScript (Vitest + Happy-DOM)
-make test-frontend
-
-# Executa análise estática de código (linter)
-make lint
 ```
 
-### 1.1 Pipeline de CI/CD (GitHub Actions)
-Todos os testes e verificações estáticas são executados automaticamente a cada `push` e `pull request` no workflow `.github/workflows/ci.yml`.
-
-### 1.2 Arquitetura de Mocks em Memória
-A lógica de negócio em `internal/monitor` e `internal/security` independe de bancos em disco através de interfaces mock:
-* `MockDeviceRepository`: Simula consulta de dispositivos e atualização de `LastSeen`.
-* `MockTelemetryRepository`: Valida persistência de incidentes.
-* `MockAlertDispatcher`: Confirma que alertas chegam à política de roteamento.
-* `MockNotificationChannel`: Testa envio de canais sem realizar chamadas de rede reais para SMTP ou Telegram.
+* **Backend (Go)**: Executa `go test ./... -v` cobrindo segurança (`lockout_test.go`, PBKDF2, complexidade de senha), persistência (`session_repo_test.go`, `retention_test.go`, migração transacional, backup/restore), middleware RBAC HTTP, política MQTT estrita, decodificador de protocolo e alertas (`alerts_test.go`).
+* **Frontend (Vitest)**: Executa `npm test` (`make test-frontend`), rodando a suíte unitária em JavaScript via Vitest (4 arquivos de teste, 26 testes — substituindo o antigo uso de pytest).
+* **Análise Estática**: Execute `go vet ./...` ou `make lint` para validar a integridade do código Go.
 
 ---
 
-## 2. Validação Manual Ponta a Ponta (E2E)
+## 2. Teste Ao Vivo via MQTT (`mosquitto_pub`)
 
-### 2.1 Ingestão via MQTT (`mosquitto_pub`)
-Com o broker protegido ativo (`make broker-auth && make broker-start`):
+Como `MONITOR_MQTT_STRICT` vem habilitado como `true` por padrão, pré-cadastre `pump-01` como dispositivo `ACTIVE` em `/devices` (ou defina `MONITOR_MQTT_STRICT=false` em desenvolvimento local) antes de publicar em `noxfort/telemetry/#`:
 
 ```bash
-# Batimento Cardíaco (Keep-Alive)
-mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secret_pass_2026}" \
-  -t "noxfort/devices/pump-01/telemetry" -m '{
-  "category": "HARDWARE",
-  "origin": "pump-01",
-  "level": "INFO",
-  "message": "System OK",
-  "occurred_at": "2026-09-27T18:00:00Z"
-}'
-
-# Incidente Crítico (Dispara Alertas Imediatos)
-mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secret_pass_2026}" \
-  -t "noxfort/devices/pump-01/telemetry" -m '{
-  "category": "HARDWARE",
-  "origin": "pump-01",
-  "level": "CRITICAL",
-  "message": "Alarme de Sobrepressão Hidráulica: 180 bar",
-  "occurred_at": "2026-09-27T18:05:00Z"
-}'
+mosquitto_pub -h 127.0.0.1 -p 1883 \
+  -t "noxfort/telemetry/pump-01" \
+  -m '{"category":"HARDWARE","origin":"pump-01","level":"INFO","message":"System OK","occurred_at":"2026-09-27T18:00:00Z"}'
 ```
 
-### 2.2 Ingestão via HTTP REST (`cURL`)
+---
+
+## 3. Teste Ao Vivo HTTP Zero-Trust (`curl`)
+
+1. **Pré-registrar dispositivo (`POST /api/pair`)**:
 
 ```bash
-curl -X POST http://localhost:22100/api/telemetry \
+curl -i -X POST http://127.0.0.1:22100/api/pair \
   -H "Content-Type: application/json" \
-  -d '{
-    "category": "SOFTWARE",
-    "origin": "carina-core",
-    "level": "WARNING",
-    "message": "Latência de inferência 4.2ms (alvo: 3.5ms)",
-    "occurred_at": "2026-09-27T18:10:00Z"
-  }'
+  -d '{"origin":"pump-02","name":"Bomba Hidráulica 02"}'
 ```
-*Resposta esperada*: Código HTTP `200 OK` com payload `{"status":"received"}`.
 
-### 2.3 Verificação de Observabilidade e Métricas
+Resposta esperada: `202 Accepted` sem chave na resposta. Acesse `/devices` como `ADMIN`, aprove `pump-02` e copie a chave temporária `nox_live_` (TTL de 5 minutos).
+
+2. **Enviar telemetria autenticada (`POST /api/telemetry`)**:
 
 ```bash
-# 1. Checagem rápida de liveness
-curl -i http://localhost:22100/healthz
-
-# 2. Diagnóstico completo de saúde e latência
-curl -s http://localhost:22100/api/health
-
-# 3. Exportador de métricas Prometheus
-curl -s http://localhost:22100/metrics
+curl -i -X POST http://127.0.0.1:22100/api/telemetry \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_SUA_CHAVE_COPIADA" \
+  -H "X-Device-Origin: pump-02" \
+  -d '{"category":"HARDWARE","origin":"pump-02","level":"WARNING","message":"Temperatura subindo (39.5C)","occurred_at":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}'
 ```
 
-### 2.4 Validação de Backup do Banco de Dados
+Resposta esperada: `202 Accepted`, atualizando `GET /api/dashboard/summary` e os contadores de `GET /metrics`.
 
-```bash
-# 1. Executa backup a quente
-make backup
+---
 
-# 2. Lista os backups existentes
-make backup-list
+## 4. Modo Demonstração e Apresentação Automatizada
 
-# 3. Valida integridade do snapshot SQLite
-sqlite3 backups/monitor_sqlite_*.db "PRAGMA integrity_check;"
-```
+Execute `make record-demo` (`scripts/demo/record_presentation.cjs` e `scripts/demo/mock_telemetry.cjs`) contra `--demo` (`RunDesktopServer()`) para validar fluxos de interface com telemetria simulada.

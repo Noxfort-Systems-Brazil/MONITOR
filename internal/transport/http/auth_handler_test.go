@@ -199,10 +199,100 @@ func TestAuthHandler_TokenExtraction(t *testing.T) {
 		t.Errorf("Failed to validate session from X-Session-Token: user=%s, role=%s, ok=%v", user, role, ok)
 	}
 
-	// 3. URL Query parameter (?token=...)
+	// 3. URL Query parameter (?token=...) must be rejected to prevent token leaks in logs
 	reqQuery := httptest.NewRequest(http.MethodGet, "/api/auth/status?token="+token, nil)
 	user, role, ok = handler.GetSessionUser(reqQuery)
-	if !ok || user != "admin_user" || role != domain.RoleAdmin {
-		t.Errorf("Failed to validate session from URL query: user=%s, role=%s, ok=%v", user, role, ok)
+	if ok || user != "" || role != "" {
+		t.Errorf("Expected session extraction from URL query to be rejected, got user=%s, role=%s, ok=%v", user, role, ok)
+	}
+
+	// 4. Reverse proxy IP and HTTPS detection
+	reqProxy := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	reqProxy.RemoteAddr = "172.18.0.5:54321"
+	reqProxy.Header.Set("X-Forwarded-For", "203.0.113.10, 172.18.0.5")
+	reqProxy.Header.Set("X-Forwarded-Proto", "https")
+	if got := ExtractClientIP(reqProxy); got != "203.0.113.10" {
+		t.Errorf("Expected forwarded IP 203.0.113.10 from trusted proxy, got %q", got)
+	}
+	if !IsHTTPSRequest(reqProxy) {
+		t.Errorf("Expected IsHTTPSRequest=true behind trusted proxy with X-Forwarded-Proto=https")
+	}
+
+	reqUntrusted := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	reqUntrusted.RemoteAddr = "198.51.100.7:1234"
+	reqUntrusted.Header.Set("X-Forwarded-For", "1.2.3.4")
+	reqUntrusted.Header.Set("X-Forwarded-Proto", "https")
+	if got := ExtractClientIP(reqUntrusted); got != "198.51.100.7" {
+		t.Errorf("Expected untrusted RemoteAddr IP 198.51.100.7, got %q", got)
+	}
+	if IsHTTPSRequest(reqUntrusted) {
+		t.Errorf("Expected IsHTTPSRequest=false when X-Forwarded-Proto comes from untrusted client IP")
+	}
+}
+
+type mockLockoutAuthService struct {
+	*mockAuthService
+	attempt domain.AuthAttemptResult
+	err     error
+}
+
+func (m *mockLockoutAuthService) AuthenticateWithAttempt(username, password, clientIP string) (*domain.User, domain.AuthAttemptResult, error) {
+	if m.err != nil {
+		return nil, m.attempt, m.err
+	}
+	u, err := m.mockAuthService.Authenticate(username, password)
+	return u, domain.AuthAttemptResult{}, err
+}
+
+func TestAuthHandler_HandleLogin_LockoutReturns429(t *testing.T) {
+	authSvc := &mockLockoutAuthService{
+		mockAuthService: newMockAuthService(),
+		attempt: domain.AuthAttemptResult{
+			FailedAttempts:    5,
+			MaxAttempts:       5,
+			IsLockdown:        true,
+			RetryAfterSeconds: 299,
+		},
+		err: errors.New("Muitas tentativas falhas"),
+	}
+	handler := NewAuthHandler(authSvc)
+
+	form := url.Values{}
+	form.Set("username", "admin_user")
+	form.Set("password", "wrong")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "198.51.100.42:12345"
+	rr := httptest.NewRecorder()
+
+	handler.HandleLogin(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("Expected status 429 Too Many Requests on lockout, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("Failed to decode 429 JSON response: %v", err)
+	}
+
+	if success, ok := payload["success"].(bool); !ok || success {
+		t.Errorf("Expected success=false, got %v", payload["success"])
+	}
+	if locked, ok := payload["is_lockdown"].(bool); !ok || !locked {
+		t.Errorf("Expected is_lockdown=true, got %v", payload["is_lockdown"])
+	}
+	if failed, ok := payload["failed_attempts"].(float64); !ok || int(failed) != 5 {
+		t.Errorf("Expected failed_attempts=5, got %v", payload["failed_attempts"])
+	}
+	if maxAtt, ok := payload["max_attempts"].(float64); !ok || int(maxAtt) != 5 {
+		t.Errorf("Expected max_attempts=5, got %v", payload["max_attempts"])
+	}
+	if retryAfter, ok := payload["retry_after_seconds"].(float64); !ok || int(retryAfter) != 299 {
+		t.Errorf("Expected retry_after_seconds=299, got %v", payload["retry_after_seconds"])
+	}
+	if msg, _ := payload["message"].(string); msg != "Muitas tentativas falhas" {
+		t.Errorf("Expected error message in JSON, got %q", msg)
 	}
 }

@@ -30,16 +30,31 @@ const ENDPOINT = {
   }
 };
 
+function resolveDeviceToken(origin) {
+  if (process.env.NOXFORT_TOKENS_JSON) {
+    try {
+      const map = JSON.parse(process.env.NOXFORT_TOKENS_JSON);
+      if (map && map[origin]) return map[origin];
+    } catch (_) {}
+  }
+  return process.env.NOXFORT_DEVICE_TOKEN || '';
+}
+
 function sendTelemetry(payload) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
+    const token = resolveDeviceToken(payload && payload.origin);
+    const headers = {
+      ...ENDPOINT.headers,
+      'Content-Length': Buffer.byteLength(data)
+    };
+    if (token) {
+      headers['X-Device-Token'] = token;
+    }
     const req = http.request(
       {
         ...ENDPOINT,
-        headers: {
-          ...ENDPOINT.headers,
-          'Content-Length': Buffer.byteLength(data)
-        }
+        headers
       },
       (res) => {
         let resBody = '';

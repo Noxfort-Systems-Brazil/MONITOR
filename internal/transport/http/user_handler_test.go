@@ -56,6 +56,22 @@ func (m *mockUserRepoForHandler) Create(u *domain.User) error {
 	return nil
 }
 
+func (m *mockUserRepoForHandler) UpdatePasswordHash(username, passwordHash string) error {
+	if u, ok := m.users[username]; ok {
+		u.PasswordHash = passwordHash
+		return nil
+	}
+	return nil
+}
+
+func (m *mockUserRepoForHandler) UpdateRole(username, role string) error {
+	if u, ok := m.users[username]; ok {
+		u.Role = role
+		return nil
+	}
+	return nil
+}
+
 func (m *mockUserRepoForHandler) Delete(id int64) error {
 	return nil
 }
@@ -263,10 +279,151 @@ func TestUserHandler_TokenInHeadersAndQuery(t *testing.T) {
 		t.Fatalf("Expected valid session via X-Session-Token header, got user=%q, role=%q, isAuth=%v", username, role, isAuth)
 	}
 
-	// 3. Validate session via URL query param (?token=...)
+	// 3. URL query param (?token=...) must be rejected to avoid leaking tokens in access logs
 	reqQuery := httptest.NewRequest(http.MethodGet, "/api/users?token="+token, nil)
 	username, role, isAuth = handler.GetSessionUser(reqQuery)
-	if !isAuth || username != security.SuperuserUsername || role != domain.RoleAdmin {
-		t.Fatalf("Expected valid session via query parameter, got user=%q, role=%q, isAuth=%v", username, role, isAuth)
+	if isAuth || username != "" || role != "" {
+		t.Fatalf("Expected query parameter session token to be rejected, got user=%q, role=%q, isAuth=%v", username, role, isAuth)
+	}
+}
+
+func TestUserHandler_DeleteErrorHeadersAndOperatorForbiddenHTML(t *testing.T) {
+	repo := &mockUserRepoForHandler{users: make(map[string]*domain.User)}
+	sm := security.NewSecurityManager(repo)
+	if err := sm.EnsureSuperuser(); err != nil {
+		t.Fatalf("Failed to initialize superuser: %v", err)
+	}
+	if _, err := sm.RegisterWithRole("op_view", "Operator#Pass2026", domain.RoleOperator); err != nil {
+		t.Fatalf("Failed to register operator: %v", err)
+	}
+
+	handler := NewUserHandler(sm, sm)
+	adminToken := sm.CreateSession(security.SuperuserUsername, domain.RoleAdmin)
+	opToken := sm.CreateSession("op_view", domain.RoleOperator)
+
+	// 1. Delete error on superuser must set Content-Type: application/json BEFORE WriteHeader
+	superForm := url.Values{"username": {security.SuperuserUsername}}
+	reqSuper := httptest.NewRequest(http.MethodPost, "/api/users/delete", strings.NewReader(superForm.Encode()))
+	reqSuper.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqSuper.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminToken})
+	recSuper := httptest.NewRecorder()
+
+	handler.HandleDelete(recSuper, reqSuper)
+	if recSuper.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d", recSuper.Code)
+	}
+	if ct := recSuper.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("Expected Content-Type application/json on HandleDelete 400 response, got %q", ct)
+	}
+	var errPayload map[string]interface{}
+	if err := json.Unmarshal(recSuper.Body.Bytes(), &errPayload); err != nil {
+		t.Fatalf("Expected valid JSON error payload, got error: %v", err)
+	}
+
+	// 2. Empty username must also return JSON 400
+	reqEmpty := httptest.NewRequest(http.MethodPost, "/api/users/delete", strings.NewReader(""))
+	reqEmpty.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqEmpty.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminToken})
+	recEmpty := httptest.NewRecorder()
+	handler.HandleDelete(recEmpty, reqEmpty)
+	if recEmpty.Code != http.StatusBadRequest || !strings.Contains(recEmpty.Header().Get("Content-Type"), "application/json") {
+		t.Errorf("Expected 400 application/json for empty username, got code=%d ct=%q", recEmpty.Code, recEmpty.Header().Get("Content-Type"))
+	}
+
+	// 3. Operator accessing /users ServePage receives 403 HTML shell instead of plain text
+	reqPage := httptest.NewRequest(http.MethodGet, "/users", nil)
+	reqPage.Header.Set("Accept", "text/html")
+	reqPage.AddCookie(&http.Cookie{Name: sessionCookieName, Value: opToken})
+	recPage := httptest.NewRecorder()
+	handler.ServePage(recPage, reqPage)
+
+	if recPage.Code != http.StatusForbidden {
+		t.Fatalf("Expected status 403 on operator GET /users, got %d", recPage.Code)
+	}
+	if ct := recPage.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Expected text/html Content-Type on operator /users 403, got %q", ct)
+	}
+	if !strings.Contains(recPage.Body.String(), "forbidden_title") || !strings.Contains(recPage.Body.String(), `href="/"`) {
+		t.Errorf("Expected rendered Monitor forbidden template, got: %s", recPage.Body.String())
+	}
+}
+
+func TestUserHandler_PasswordRoleUnlockAndRBAC(t *testing.T) {
+	repo := &mockUserRepoForHandler{users: make(map[string]*domain.User)}
+	sm := security.NewSecurityManager(repo)
+	if err := sm.EnsureSuperuser(); err != nil {
+		t.Fatalf("EnsureSuperuser failed: %v", err)
+	}
+	if _, err := sm.RegisterWithRole("op_shift", "Operator#Pass2026", domain.RoleOperator); err != nil {
+		t.Fatalf("Register operator failed: %v", err)
+	}
+
+	server := NewServer("", nil, nil, nil, nil, nil, nil, sm, nil, nil, nil)
+	router := server.Handler()
+
+	adminTok := sm.CreateSession(security.SuperuserUsername, domain.RoleAdmin)
+	opTok := sm.CreateSession("op_shift", domain.RoleOperator)
+
+	// 1. Operator can change their OWN password when supplying valid current_password
+	selfPassForm := url.Values{
+		"username":         {"op_shift"},
+		"current_password": {"Operator#Pass2026"},
+		"new_password":     {"Operator#New2026"},
+	}
+	reqSelfPass := httptest.NewRequest(http.MethodPost, "/api/users/password", strings.NewReader(selfPassForm.Encode()))
+	reqSelfPass.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqSelfPass.AddCookie(&http.Cookie{Name: sessionCookieName, Value: opTok})
+	recSelfPass := httptest.NewRecorder()
+	router.ServeHTTP(recSelfPass, reqSelfPass)
+	if recSelfPass.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on operator self password change, got %d: %s", recSelfPass.Code, recSelfPass.Body.String())
+	}
+	if _, _, valid := sm.ValidateSession(opTok); valid {
+		t.Error("Expected operator's previous session to be revoked after password change")
+	}
+
+	// 2. Operator CANNOT change admin's password (403) or update roles (403)
+	opNewTok := sm.CreateSession("op_shift", domain.RoleOperator)
+	otherPassForm := url.Values{
+		"username":     {security.SuperuserUsername},
+		"new_password": {"Hacked@2026!"},
+	}
+	reqOtherPass := httptest.NewRequest(http.MethodPost, "/api/users/password", strings.NewReader(otherPassForm.Encode()))
+	reqOtherPass.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqOtherPass.AddCookie(&http.Cookie{Name: sessionCookieName, Value: opNewTok})
+	recOtherPass := httptest.NewRecorder()
+	router.ServeHTTP(recOtherPass, reqOtherPass)
+	if recOtherPass.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 when operator tries changing another account's password, got %d", recOtherPass.Code)
+	}
+
+	roleForm := url.Values{"username": {"op_shift"}, "role": {domain.RoleAdmin}}
+	reqOpRole := httptest.NewRequest(http.MethodPost, "/api/users/role", strings.NewReader(roleForm.Encode()))
+	reqOpRole.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqOpRole.AddCookie(&http.Cookie{Name: sessionCookieName, Value: opNewTok})
+	recOpRole := httptest.NewRecorder()
+	router.ServeHTTP(recOpRole, reqOpRole)
+	if recOpRole.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 when operator tries /api/users/role, got %d", recOpRole.Code)
+	}
+
+	// 3. Admin promotes op_shift -> ADMIN and unlocks account
+	reqAdminRole := httptest.NewRequest(http.MethodPost, "/api/users/role", strings.NewReader(roleForm.Encode()))
+	reqAdminRole.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqAdminRole.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminTok})
+	recAdminRole := httptest.NewRecorder()
+	router.ServeHTTP(recAdminRole, reqAdminRole)
+	if recAdminRole.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on admin role promotion, got %d: %s", recAdminRole.Code, recAdminRole.Body.String())
+	}
+
+	unlockForm := url.Values{"username": {"op_shift"}}
+	reqUnlock := httptest.NewRequest(http.MethodPost, "/api/users/unlock", strings.NewReader(unlockForm.Encode()))
+	reqUnlock.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqUnlock.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminTok})
+	recUnlock := httptest.NewRecorder()
+	router.ServeHTTP(recUnlock, reqUnlock)
+	if recUnlock.Code != http.StatusOK {
+		t.Fatalf("Expected 200 on admin unlock, got %d: %s", recUnlock.Code, recUnlock.Body.String())
 	}
 }

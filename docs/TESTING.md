@@ -58,23 +58,25 @@ graph LR
 ```
 
 ### What Is Validated in Automated Tests:
-* **Smart Heartbeat Filter ([`state_test.go`](../internal/monitor/state_test.go))**: Confirms that `INFO` messages containing keep-alive keywords update presence timestamps without creating incidents or dispatching alerts.
-* **Watchdog Timing & Outage Detection ([`engine_test.go`](../internal/monitor/engine_test.go))**: Simulates devices silent for more than 5 minutes, ensuring the Engine synthesizes the `CRITICAL` `System OFFLINE` event and the subsequent `System ONLINE` recovery event.
-* **Role-Based RBAC Routing ([`router_test.go`](../internal/monitor/router_test.go))**: Confirms that `HARDWARE` alerts are routed strictly to technicians/admins, and `SOFTWARE` alerts strictly to programmers/admins.
-* **Cryptography & Sessions ([`hasher_test.go`](../internal/security/hasher_test.go), [`session_test.go`](../internal/security/session_test.go))**: Verifies secure salted password hashing and session token expiration.
-* **Database Hot-Reload ([`db_manager_test.go`](../internal/storage/db_manager_test.go))**: Validates live connection switching without closing active repository consumers.
+* **Smart Heartbeat Filter & Maintenance Mode ([`state_test.go`](../internal/monitor/state_test.go))**: Confirms that `INFO` keep-alive messages update presence without noise and paused devices (`Enabled=false`) are suppressed.
+* **Watchdog Timing, Outage Detection & Alert Reliability ([`engine_test.go`](../internal/monitor/engine_test.go), [`alerts_test.go`](../internal/monitor/alerts_test.go))**: Simulates devices silent > 5 minutes, validates retry backoff, graceful `Shutdown()`, `telemetry_id` audit linkage, and SMTP CRLF header sanitization.
+* **Role-Based RBAC Routing ([`router_test.go`](../internal/monitor/router_test.go))**: Confirms `HARDWARE` alerts route to technicians/admins and `SOFTWARE` alerts route to programmers/admins.
+* **Cryptography, Lockout & Persistent Sessions ([`hasher_test.go`](../internal/security/hasher_test.go), [`lockout_test.go`](../internal/security/lockout_test.go), [`session_repo_test.go`](../internal/storage/session_repo_test.go))**: Verifies PBKDF2 HMAC-SHA256 hashing, brute-force lockouts (HTTP `429`), password changes, role guards, SHA-256 hashed DB sessions, and hot-reload.
+* **Zero-Trust Device & MQTT Enforcement ([`device_repo_test.go`](../internal/storage/device_repo_test.go), [`telemetry_handler_test.go`](../internal/transport/http/telemetry_handler_test.go), [`client_test.go`](../internal/transport/mqtt/client_test.go))**: Verifies `/api/pair` anti-hijack (`409`), constant-time `X-Device-Token`, TTL expiration, key rotation, and strict MQTT filtering.
+* **Database Hot-Reload, Transactional Migration, Backup Restore & Retention ([`db_manager_test.go`](../internal/storage/db_manager_test.go), [`migrator_test.go`](../internal/storage/migrator_test.go), [`backup_test.go`](../internal/storage/backup_test.go), [`retention_test.go`](../internal/storage/retention_test.go))**: Validates engine switching, atomic SQLite backup/restore (`PRAGMA quick_check`), path traversal rejection, and 90-day pruning.
+* **HTTP RBAC, Secret Redaction & Frontend Vitest Suite ([`server_test.go`](../internal/transport/http/server_test.go), [`settings_handler_test.go`](../internal/transport/http/settings_handler_test.go), [`web/static/js/__tests__/`](../web/static/js/__tests__/))**: Verifies Operator read-only `403` negotiation (`forbidden.html` / JSON), DOM secret redaction, i18n, password strength meter, and JS API clients.
 
 ---
 
 ## 3. Manual E2E Testing
 
 ### 3.1 MQTT Ingestion Test (`mosquitto_pub`)
-Ensure the local broker is running with configured credentials (`make broker-auth && make broker-start`):
+Ensure the local broker is running (`make broker-auth && make broker-start`) and the origin (`pump-01`) is already registered and `ACTIVE` in `/devices` (unless `MONITOR_MQTT_STRICT=false` is set for local dev):
 
 #### 1. Simulate Normal Heartbeat (Keep-alive)
 ```bash
 mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secret_pass_2026}" \
-  -t "noxfort/devices/pump-01/telemetry" -m '{
+  -t "noxfort/telemetry/pump-01" -m '{
   "category": "HARDWARE",
   "origin": "pump-01",
   "level": "INFO",
@@ -82,12 +84,12 @@ mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secre
   "occurred_at": "2026-09-05T10:00:00Z"
 }'
 ```
-*Expected Result*: Device `pump-01` updates its `last_seen` timestamp. No alert is dispatched and no unneeded record is added to `telemetry_logs`.
+*Expected Result*: Device `pump-01` updates its `last_seen` timestamp. No alert is dispatched and no unneeded record is added to `telemetry`.
 
 #### 2. Simulate Critical Hardware Incident
 ```bash
 mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secret_pass_2026}" \
-  -t "noxfort/devices/pump-01/telemetry" -m '{
+  -t "noxfort/telemetry/pump-01" -m '{
   "category": "HARDWARE",
   "origin": "pump-01",
   "level": "CRITICAL",
@@ -95,25 +97,39 @@ mosquitto_pub -u "${MQTT_USER:-noxfort_user}" -P "${MQTT_PASSWORD:-noxfort_secre
   "occurred_at": "2026-09-05T10:05:00Z"
 }'
 ```
-*Expected Result*: Event is persisted in `telemetry_logs`, appears on the Web Dashboard, and immediately dispatches alerts to contacts with `TECHNICIAN` and `ADMIN` roles.
+*Expected Result*: Event is persisted in `telemetry`, appears on the live Web Dashboard, and immediately dispatches alerts to contacts with `TECHNICIAN` and `ADMIN` roles.
 
 ---
 
-### 3.2 HTTP REST Ingestion Test (`cURL`)
-To validate the `POST /api/telemetry` route utilized by remote edge agents:
+### 3.2 HTTP REST Pairing & Ingestion Test (`cURL`)
+To validate the Zero-Trust `POST /api/pair` and `POST /api/telemetry` workflow:
 
 ```bash
+# 1. Initiate pairing (copy generated nox_live_... API key from /devices UI)
+curl -X POST http://localhost:22100/api/pair \
+  -H "Content-Type: application/json" \
+  -d '{"origin": "synapse-node-02", "name": "Synapse Node 02"}'
+
+# 2. Send authenticated telemetry (use current UTC timestamp within ±5 minutes)
 curl -X POST http://localhost:22100/api/telemetry \
   -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_<copied_api_key>" \
   -d '{
     "category": "SOFTWARE",
     "origin": "synapse-node-02",
     "level": "WARNING",
     "message": "RAM consumption exceeded 80%",
-    "occurred_at": "2026-09-05T17:10:00Z"
+    "occurred_at": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"
   }'
 ```
-*Expected Result*: HTTP `200 OK` response with `{"status":"received"}` and incident logged on the Dashboard.
+*Expected Result*: HTTP `202 Accepted` on pairing, followed by HTTP `200 OK` (`{"status":"received"}`) on ingestion (promoting `synapse-node-02` to `ACTIVE`).
+
+You can also run the automated demo telemetry helper with a token:
+```bash
+NOXFORT_DEVICE_TOKEN="nox_live_<key>" node -e 'require("./scripts/demo/mock_telemetry.cjs").seedNormalTelemetry()'
+# Or full automated Playwright demo video recording:
+make record-demo
+```
 
 ---
 

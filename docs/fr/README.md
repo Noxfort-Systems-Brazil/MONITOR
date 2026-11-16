@@ -3,7 +3,7 @@
 <img src="../assets/monitor-logo.png" alt="Logo de Noxfort Monitor" width="120" />
 
 # Noxfort Monitor™ — Suite de Documentation Technique
-### Architecture Système, Ingestion Télémétrique et Persistance Double-Moteur
+### Architecture Système, Ingestion Télémétrique Zero-Trust et Persistance Double-Moteur
 *Noxfort Systems — A State Of Art Company*
 
 [![Status](https://img.shields.io/badge/Status-Actif-brightgreen?style=flat&logo=github)](https://github.com/Noxfort-Systems-Brazil/MONITOR)
@@ -22,24 +22,24 @@
 
 ## Bienvenue dans la Documentation Technique Officielle
 
-Ce répertoire rassemble la suite documentaire technique en **Français** pour **Noxfort Monitor™ v2.0** — plateforme industrielle d'observabilité événementielle, d'ingestion télémétrique en temps réel et d'orchestration de réponse aux incidents conçue en Go pour les systèmes distribués, les agents autonomes (**Carina**, **Synapse**) et les nœuds IoT.
+Ce répertoire rassemble la suite documentaire technique en **Français** pour **Noxfort Monitor™ v2.0** — plateforme industrielle d'observabilité événementielle, d'ingestion télémétrique Zero-Trust en temps réel et d'orchestration de réponse aux incidents conçue en Go pour les systèmes distribués, les agents autonomes (**Carina**, **Synapse**) et les nœuds IoT.
 
 ## Répertoire des Guides Techniques
 
 | Document | Sujet & Périmètre | Contenu Principal |
 |---|---|---|
-| 📖 **[Architecture Système](architecture.md)** | Spécification d'Architecture | Architecture orientée événements (EDA), concurrence via Goroutines, couches SOLID et injection de dépendances à la racine. |
-| 📡 **[API et Protocoles d'Ingestion](api_reference.md)** | Protocoles Réseau | Ingestion MQTT asynchrone (`:1883`), REST `POST /api/telemetry` (`:22100`), schéma JSON unifié `IncomingEvent` et routes d'administration. |
-| 🗄️ **[Base de Données et Persistance](database.md)** | Persistance Double-Moteur | Basculement à chaud via `DBManager`, PostgreSQL & SQLite pur sans CGO, migration cohérente et adaptation des dialectes SQL. |
-| 🔐 **[Sécurité, Authentification et RBAC](security.md)** | Sécurité et Contrôle d'Accès | Contrôle d'accès basé sur les rôles (`RoleAdmin`, `RoleOperator`), hachage avec sel, cookies de session et amorçage idempotent. |
-| 🌐 **[Accès Distant et WAN (DuckDNS & Ngrok)](remote_access.md)** | Connectivité WAN | Synchronisation d'IP dynamique DuckDNS, tunnel inverse Ngrok franchissant pare-feu/CGNAT et transfert télémétrique. |
-| 🛡️ **[Proxy Inverse Caddy & DuckDNS](caddy_integration.md)** | Passerelle HTTPS | Terminaison TLS/SSL automatique avec défi ACME DNS-01, port 443 standardisé et WebSockets chiffrés (`/mqtt`). |
-| 🖥️ **[Application Desktop et Headless](desktop_app.md)** | Interface et Exploitation | Runtime natif Wails v2 + WebKitGTK, verrou d'instance unique via socket IPC Unix, barre d'état (Systray) et mode daemon `--headless`. |
-| 🔍 **[Piste d'Audit et SLA](audit_trail.md)** | Traçabilité et Conformité | Modèle d'audit triple : logs d'accès de sécurité (`SecurityAuditLog`), conformité SLA des alertes (`AlertDispatchLog`) et temps d'arrêt. |
-| 🚀 **[Guide de Déploiement en Production](deployment.md)** | Exploitation et DevOps | Service systemd en mode headless, passerelle HTTPS avec Caddy/NGINX et paquet Debian `.deb`. |
-| 🧪 **[Tests et Assurance Qualité](testing.md)** | Validation et Qualité | Suite de tests unitaires avec mocks en Go, validation E2E manuelle avec `mosquitto_pub` / `curl` et diagnostics de canaux. |
-| 👨‍💻 **[Guide Développeur Avancé](developer_guides.md)** | Ingénierie et Extensibilité | Environnement local, principes SOLID, dépôts rechargeables (`DBManager`), nouveaux canaux et entités. |
-| 🔬 **[Notes de Recherche & Décisions Techniques](research_notes.md)** | Registre d'Architecture (ADR) | Historique des choix techniques : élimination de CGO, Wails v2, DuckDNS/Caddy et feuille de route gRPC. |
+| 📖 **[Architecture Système](architecture.md)** | Spécification d'Architecture | Architecture orientée événements (EDA), Goroutines, `BufferedTelemetryWriter`, modes Desktop / `--headless` / `--demo` et arrêt propre (`AlertService.Shutdown`). |
+| 📡 **[API et Protocoles d'Ingestion](api_reference.md)** | Protocoles Réseau | MQTT asynchrone `noxfort/telemetry/#` (`MONITOR_MQTT_STRICT`), appairage Zero-Trust `POST /api/pair` et `POST /api/telemetry` (`:22100`), schéma `IncomingEvent` et routes RBAC. |
+| 🗄️ **[Base de Données et Persistance](database.md)** | Persistance Double-Moteur | SQLite WAL + PostgreSQL avec basculement à chaud via `DBManager`, `7` `ReloadableRepository`, `MigrateData` transactionnel (9 tables), sauvegardes/restauration et `RetentionManager`. |
+| 🔐 **[Sécurité, Authentification et RBAC](security.md)** | Sécurité et Contrôle d'Accès | `OPERATOR` strictement en lecture seule (`403` / `forbidden.html`), `PBKDF2Hasher` (100k itér.), `LoginAttemptTracker` (`429`), `DBSessionStore` (`SHA-256`), `TRUSTED_PROXIES` et masquage HTML. |
+| 🌐 **[Accès Distant et WAN (DuckDNS & Ngrok)](remote_access.md)** | Connectivité WAN | Synchronisation dynamique DuckDNS, tunnel inverse Ngrok, rédaction des jetons dans `/remote` et ingestion Zero-Trust distante. |
+| 🛡️ **[Proxy Inverse Caddy & DuckDNS](caddy_integration.md)** | Passerelle HTTPS | Terminaison TLS/SSL ACME DNS-01, en-têtes `X-Forwarded-*` avec `TRUSTED_PROXIES`, port 443 et WebSockets chiffrés (`/mqtt`). |
+| 🖥️ **[Application Desktop, Headless et Demo](desktop_app.md)** | Interface et Exploitation | Runtime Wails v2 + WebKitGTK, verrou d'instance unique IPC Unix, modes `--headless` et `--demo`, polling `/api/dashboard/summary` et page `forbidden.html`. |
+| 🔍 **[Piste d'Audit et SLA](audit_trail.md)** | Traçabilité et Conformité | Triple audit (`SecurityAuditLog`, `AlertDispatchLog` lié à `telemetry_id`, `DeviceStateTransition`), lecture `Operator+` et purge automatique après 90 jours. |
+| 🚀 **[Guide de Déploiement en Production](deployment.md)** | Exploitation et DevOps | Variables `.env` (`configs/config.yaml` supprimé), systemd headless, Docker Compose, Caddy/NGINX, paquet `.deb`, sauvegardes et `/metrics`. |
+| 🧪 **[Tests et Assurance Qualité](testing.md)** | Validation et Qualité | Suite Go + Vitest (`make test`), mocks en mémoire, tests E2E `mosquitto_pub` (`noxfort/telemetry/#`) / `curl` (`/api/pair` + `X-Device-Token`) et `make record-demo`. |
+| 👨‍💻 **[Guide Développeur Avancé](developer_guides.md)** | Ingénierie et Extensibilité | Environnement local, contrat `ReloadableRepository` (`SetDB(db, driver)`), `internal/metrics`, utilitaires HTTP de sécurité et cycle `bgCtx`. |
+| 🔬 **[Notes de Recherche & Décisions Techniques](research_notes.md)** | Registre d'Architecture (ADR) | Décisions techniques : suppression de CGO et `config.yaml`, appairage Zero-Trust, sessions hachées en BD, WAL/rétention et métriques Prometheus. |
 
 ---
 

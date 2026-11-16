@@ -59,6 +59,8 @@ func TestMetricsHandler_ServeMetrics(t *testing.T) {
 		"noxfort_db_latency_ms 3",
 		"noxfort_mqtt_connected 1",
 		"noxfort_devices_total 0",
+		"noxfort_devices_by_status{state=\"online\"} 0",
+		"noxfort_telemetry_buffer_depth 0",
 	}
 
 	for _, metric := range expectedMetrics {

@@ -131,6 +131,42 @@ func (r *UserRepositorySQLite) Create(user *domain.User) error {
 	return nil
 }
 
+// UpdatePasswordHash updates the PBKDF2 password hash for the specified username.
+func (r *UserRepositorySQLite) UpdatePasswordHash(username, passwordHash string) error {
+	db, driver := r.getDB()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	query := AdaptQuery(`UPDATE users SET password_hash = ? WHERE username = ?;`, driver)
+	res, err := db.Exec(query, passwordHash, username)
+	if err != nil {
+		return fmt.Errorf("failed to update user password: %w", err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+// UpdateRole changes the RBAC role for the specified username.
+func (r *UserRepositorySQLite) UpdateRole(username, role string) error {
+	db, driver := r.getDB()
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	query := AdaptQuery(`UPDATE users SET role = ? WHERE username = ?;`, driver)
+	res, err := db.Exec(query, role, username)
+	if err != nil {
+		return fmt.Errorf("failed to update user role: %w", err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
 // Delete removes a user by ID.
 func (r *UserRepositorySQLite) Delete(id int64) error {
 	db, driver := r.getDB()

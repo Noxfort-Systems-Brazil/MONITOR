@@ -57,7 +57,7 @@ func (h *AuditHandler) ServePage(w http.ResponseWriter, r *http.Request) {
 		"TransitionLogs": transLogs,
 	}
 
-	if err := RenderPage(w, "web/templates/audit.html", data); err != nil {
+	if err := RenderPageWithRequest(w, r, "web/templates/audit.html", data); err != nil {
 		log.Printf("[AUDIT] Template error: %v", err)
 		http.Error(w, "Template Error", http.StatusInternalServerError)
 		return

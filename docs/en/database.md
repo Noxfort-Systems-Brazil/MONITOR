@@ -1,83 +1,58 @@
-# 🗄️ Persistence & Dual-Engine Architecture
+# Noxfort Monitor — Database Architecture & Lifecycle
 
-This document details the dual-engine persistence layer of **Noxfort Monitor™ v2.0**, covering PostgreSQL and SQLite coexistence, the live connection hot-reload manager (`DBManager`), automated data migration, and the SQL dialect adapter.
-
-⬅️ [Central Hub](../README.md) | 🏛️ [Architecture](architecture.md) | 📡 [API](api_reference.md) | 🔐 [Security](security.md)
+Noxfort Monitor uses a dual-engine persistence layer supporting zero-restart hot switching between embedded **SQLite (WAL mode)** and **PostgreSQL**, backed by transactional migration, hot backup/restore, and automated data retention.
 
 ---
 
-## 1. Dual-Engine Coexistence
+## 1. Dual-Engine Architecture & Hot Reload
 
-Noxfort Monitor supports both lightweight standalone deployments and distributed high-availability clusters through an engine-agnostic persistence layer:
-
-| Dimension | SQLite (Pure-Go) | PostgreSQL |
-|---|---|---|
-| **Go Driver** | `modernc.org/sqlite` (CGO-free) | `github.com/lib/pq` |
-| **Use Case** | Single-user workstations, local edge nodes | High-concurrency servers, enterprise networks |
-| **File / Host** | `~/Documentos/Monitor/monitor_logs.db` | TCP Server (port `5432`) |
-| **Schema Isolation** | Single file database | Dedicated schema (`schema_monitor`) |
-| **Dependencies** | None (embedded in Go binary) | External PostgreSQL 12+ server |
-
----
-
-## 2. Dynamic Hot-Reload (`DBManager`)
-
-The `DBManager` orchestrates runtime database switching without restarting the process or dropping active client connections:
-
-```mermaid
-graph TD
-    UI[Web / Desktop UI] -->|Save Configuration| DBHandler[DatabaseHandler]
-    DBHandler -->|Test / Migrate / Switch| DBManager[Central DBManager]
-    
-    subgraph "Reloadable Repositories"
-        DeviceRepo[DeviceRepository]
-        ContactRepo[ContactRepository]
-        SettingsRepo[SettingsRepository]
-        TelemetryRepo[TelemetryRepository]
-        UserRepo[UserRepository]
-        AuditRepo[AuditRepository]
-    end
-    
-    DBManager -->|SetDB / Atomically Swap Handle| DeviceRepo
-    DBManager -->|SetDB / Atomically Swap Handle| ContactRepo
-    DBManager -->|SetDB / Atomically Swap Handle| SettingsRepo
-    DBManager -->|SetDB / Atomically Swap Handle| TelemetryRepo
-    DBManager -->|SetDB / Atomically Swap Handle| UserRepo
-    DBManager -->|SetDB / Atomically Swap Handle| AuditRepo
+```
++---------------------------------------------------------------+
+|                         DBManager                             |
+|   - Holds active *sql.DB handle + dialect ("sqlite"/"postgres")|
+|   - Coordinates MigrateData + Switch()                        |
++------------------------------+--------------------------------+
+                               | SetDB(db *sql.DB, driver string)
+                               v
+   +--------------------------------------------------------+
+   | ReloadableRepository (7 Repositories)                  |
+   |  1. DeviceRepository     5. AuditRepository            |
+   |  2. TelemetryRepository  6. UserRepository             |
+   |  3. SettingsRepository   7. DBSessionStore             |
+   |  4. ContactRepository                                  |
+   +--------------------------------------------------------+
 ```
 
-Every repository implements `ReloadableRepository`:
-```go
-type ReloadableRepository interface {
-    SetDB(db *sql.DB)
-}
-```
+* **SQLite Concurrency Optimization**: Initialized with `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` for lock-free concurrent reads and buffered writes.
+* **Schema Parity (`9` Tables, `12` Indexes)**: Both SQLite and PostgreSQL maintain identical logical schemas across `devices` (including `api_key`, `status`, `expires_at`), `telemetry` (referencing `device_id`), `settings`, `contacts`, `users`, `sessions` (`token_hash`, `expires_at`), `security_audit_logs`, `alert_dispatch_logs`, and `device_state_transitions`.
+* **Atomic Engine Switching**: Calling `SetDB(db *sql.DB, driver string)` dynamically rebinds all 7 `ReloadableRepository` instances at runtime without restarting the HTTP or MQTT servers.
 
 ---
 
-## 3. Automated Heterogeneous Migration (`MigrateData`)
+## 2. Transactional Live Migration (`MigrateData`)
 
-When switching between SQLite and PostgreSQL, `MigrateData()` guarantees zero data loss:
-1. Opens source and destination database handles concurrently.
-2. Extracts and transfers all entities: devices, contacts, global settings, users, telemetry history, security audit logs, alert dispatch logs, and device state transitions.
-3. Performs upsert operations using `storage.AdaptQuery()` to resolve dialect differences (`ON CONFLICT (id) DO UPDATE`).
-4. Re-points all repositories to the destination database and persists the new configuration to disk.
+* When switching from SQLite to PostgreSQL (or vice versa), `Migrator.MigrateData` transfers all **9 tables** inside a **single database transaction**.
+* If any table fails to copy or verify, the transaction rolls back cleanly and `DBManager.Switch` aborts, preventing split-brain or partially migrated states.
 
 ---
 
-## 4. Automated Hot Backups & Retention Strategy
+## 3. Hot Backups & Verified Restore (`BackupManager`)
 
-Noxfort Monitor features a zero-downtime database snapshot engine implemented in [`internal/storage/backup.go`](../../internal/storage/backup.go):
+* **Non-Blocking Hot Backups**:
+  * **SQLite**: Uses `VACUUM INTO` to produce an atomic, consistent snapshot without stopping telemetry ingestion.
+  * **PostgreSQL**: Invokes `pg_dump -F c` custom-format dumps.
+* **Scheduled Automation**: `BackupManager.StartScheduledBackups` runs periodically according to `MONITOR_BACKUP_INTERVAL_HOURS` (default `24h`) and retains the most recent **`7`** snapshots.
+* **Secure Download & Restore**:
+  * `GET /api/settings/database/backups/download` enforces `ResolveBackupPath` to block path traversal.
+  * `POST /api/settings/database/restore` validates SQLite uploads with `PRAGMA quick_check` before swapping via `RestoreSQLiteFile`, or restores PostgreSQL archives with `pg_restore`.
 
-### 4.1 Non-Blocking Hot Snapshots
-* **SQLite Mode**: Executes the atomic SQL command `VACUUM INTO '<destination_path>'`. This copies the active database safely into a clean `.db` snapshot on disk without blocking active write or read transactions.
-* **PostgreSQL Mode**: Uses `pg_dump` with custom binary compression (`-F c`) to create an encrypted, restorable snapshot.
+---
 
-### 4.2 File Retention & Rotation Policy
-* Backups are saved to `backups/monitor_<driver>_YYYYMMDD_HHMMSS.<ext>` with owner-only permissions (`0600`).
-* Automatically retains the latest 7 daily snapshots.
+## 4. Automated Data Retention (`RetentionManager`)
 
-### 4.3 Invocation Interfaces
-* **Makefile**: `make backup` and `make backup-list`.
-* **Automated Script**: [`scripts/backup.sh`](../../scripts/backup.sh).
-* **REST API**: `POST /api/settings/database/backup` and `GET /api/settings/database/backups`.
+* Controlled by `MONITOR_RETENTION_DAYS` (default **`90` days**), running every **`24` hours**.
+* Automatically prunes aged historical records across 4 high-growth tables while preserving registered devices, users, active sessions, and configuration:
+  1. `telemetry`
+  2. `alert_dispatch_logs`
+  3. `security_audit_logs`
+  4. `device_state_transitions`

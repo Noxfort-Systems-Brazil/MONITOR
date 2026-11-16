@@ -110,3 +110,14 @@ func (s *MemorySessionStore) RevokeSession(token string) {
 	defer s.mu.Unlock()
 	delete(s.sessions, token)
 }
+
+// RevokeUserSessions deletes all active memory sessions belonging to username.
+func (s *MemorySessionStore) RevokeUserSessions(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, sess := range s.sessions {
+		if sess.Username == username {
+			delete(s.sessions, token)
+		}
+	}
+}

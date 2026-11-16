@@ -80,9 +80,15 @@ DUCKDNS_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 # Email address for Let's Encrypt expiration notifications
 ACME_EMAIL=admin@your-company.com
 
-# Enable HTTPS telemetry URL formatting in Noxfort Monitor
+# Enable HTTPS telemetry URL formatting & Secure session cookies in Noxfort Monitor
 MONITOR_USE_HTTPS=true
+
+# Optional: additional trusted reverse proxy IPs/CIDRs (loopback and private Docker bridge subnets are trusted automatically)
+# TRUSTED_PROXIES=10.0.0.0/8,203.0.113.10
 ```
+
+> [!TIP]
+> [`caddy/Caddyfile`](../caddy/Caddyfile) automatically forwards `Host`, `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto` to the Monitor Core (`host.docker.internal:22100`), enabling accurate client IP attribution for brute-force lockout (`LoginAttemptTracker`) and security audit logs as well as automatic `Secure` session cookie detection (`IsHTTPSRequest`).
 
 ### 3.2 Build the Caddy Container
 Compile the custom Caddy image equipped with the `caddy-dns/duckdns` plugin:
@@ -135,12 +141,19 @@ server: Caddy
 ```
 
 > [!NOTE]
-> An **HTTP 403 Forbidden** response on root `GET` requests is the expected, intended security behavior: external web browser access to the dashboard is deactivated by design to confine administrative operations to the native desktop application. External ingestion via `POST /api/telemetry` responds with **HTTP 200 OK**.
+> An **HTTP 403 Forbidden** response on root `GET` requests is the expected, intended security behavior: external web browser access to the dashboard is deactivated by design to confine administrative operations to the native desktop application. External Zero-Trust pairing (`POST /api/pair`), authenticated ingestion (`POST /api/telemetry`), and observability probes (`/healthz`, `/api/health`, `/metrics`) are handled directly on port `443`.
 
-### Transmit Telemetry over Secure HTTPS:
+### Pair & Transmit Telemetry over Secure HTTPS:
 ```bash
+# 1. Request pairing (copy generated nox_live_... API key from /devices console within 5 minutes)
+curl -X POST "https://your-subdomain.duckdns.org/api/pair" \
+  -H "Content-Type: application/json" \
+  -d '{"origin": "edge-station-01", "name": "Edge Station 01"}'
+
+# 2. Send authenticated telemetry using X-Device-Token
 curl -X POST "https://your-subdomain.duckdns.org/api/telemetry" \
   -H "Content-Type: application/json" \
+  -H "X-Device-Token: nox_live_<your_device_api_key>" \
   -d '{
     "category": "HARDWARE",
     "origin": "edge-station-01",

@@ -43,7 +43,56 @@ class DatabaseSettingsController {
             onSubmitProvision: () => this.handleProvisionUser()
         });
 
+        this.view.btnCreateBackup?.addEventListener('click', () => this.handleCreateBackup());
+
         this.loadStatus();
+        this.loadBackups();
+    }
+
+    async loadBackups() {
+        if (!this.view.backupsTableBody || typeof this.api.listBackups !== 'function') return;
+        try {
+            const list = await this.api.listBackups();
+            this.view.renderBackups(list, (filename) => this.handleRestoreBackup(filename));
+        } catch (e) {
+            this.view.showBackupFeedback('Não foi possível listar backups: ' + e.message, 'warning');
+        }
+    }
+
+    async handleCreateBackup() {
+        this.view.setCreateBackupState(true);
+        try {
+            const { ok, data } = await this.api.createBackup();
+            if (ok && data.success) {
+                this.view.showBackupFeedback(`✅ ${data.message} (${data.backup?.filename || ''})`, 'success');
+                await this.loadBackups();
+            } else {
+                this.view.showBackupFeedback('❌ ' + (data?.error || 'Falha ao gerar backup.'), 'danger');
+            }
+        } catch (e) {
+            this.view.showBackupFeedback('❌ Erro de rede ao criar backup: ' + e.message, 'danger');
+        } finally {
+            this.view.setCreateBackupState(false);
+        }
+    }
+
+    async handleRestoreBackup(filename) {
+        if (!filename) return;
+        if (!confirm(`⚠️ ATENÇÃO: Restaurar "${filename}" substituirá os dados atuais do banco ativo. Deseja continuar?`)) {
+            return;
+        }
+        this.view.showBackupFeedback(`Restaurando "${filename}"...`, 'info');
+        try {
+            const { ok, data } = await this.api.restoreBackup(filename);
+            if (ok && data.success) {
+                this.view.showBackupFeedback(`✅ ${data.message}`, 'success');
+                await this.loadStatus();
+            } else {
+                this.view.showBackupFeedback('❌ ' + (data?.error || 'Falha ao restaurar backup.'), 'danger');
+            }
+        } catch (e) {
+            this.view.showBackupFeedback('❌ Erro de rede ao restaurar: ' + e.message, 'danger');
+        }
     }
 
     getRelevantConfigString(payload) {

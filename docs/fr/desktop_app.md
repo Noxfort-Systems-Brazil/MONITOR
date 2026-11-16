@@ -1,60 +1,47 @@
-# 🖥️ Application Desktop et Exploitation (Wails v2 & Headless)
+# 🖥️ Application Desktop et Modes d'Exécution (Wails v2, `--demo` & `--headless`)
 
-Ce document détaille l'architecture desktop de **Noxfort Monitor™ v2.0**, conçue avec **Wails v2** et **WebKitGTK**, le verrouillage d'instance unique par socket Unix, la gestion de la barre des tâches et le mode daemon serveur (`--headless`).
+Ce document détaille l'architecture client/serveur de **Noxfort Monitor™ v2.0** à partir de [`cmd/server/main.go`](../../cmd/server/main.go) : **Wails v2** + **WebKitGTK**, mode présentation `--demo`, mode serveur `--headless` / `--server-only`, polling temps réel et sécurité intégrée.
 
 ⬅️ [Hub Central](../README.md) | 🏛️ [Architecture](architecture.md) | 🚀 [Déploiement](deployment.md)
 
 ---
 
-## 1. Architecture Wails v2
-
-Pour éviter la surcharge des moteurs Chromium/Electron, Noxfort Monitor utilise **Wails v2** couplé au composant natif Linux **WebKitGTK** :
+## 1. Modes d'Exécution
 
 ```mermaid
 graph TD
     subgraph "Processus Central Noxfort Monitor"
         Main[cmd/server/main.go]
-        HTTP[Serveur HTTP Local :22100]
-        IPC[Serveur Socket Instance Unique]
+        HTTP["Serveur HTTP :22100"]
+        IPC[Socket Instance Unique IPC Unix]
         Tray[internal/tray - Systray GTK]
-        
-        subgraph "Runtime Wails v2"
-            WailsApp[desktop.App]
-            WebKit[Fenêtre WebKitGTK]
-            SessionBridge[desktopResponseWriter - Synchronisation Cookies]
+
+        subgraph "Modes"
+            WailsApp["Desktop (Wails v2 + WebKitGTK)"]
+            DemoSrv["--demo (RunDesktopServer)"]
+            Headless["--headless / --server-only"]
         end
     end
 
-    Main -->|Mode Desktop Standard| WailsApp
-    WailsApp --> WebKit
-    WebKit -->|Custom AssetServer| SessionBridge
-    SessionBridge --> HTTP
-    WailsApp -->|Callbacks| Tray
-    Main -->|Mode --headless| HTTP
+    Main -->|Standard| WailsApp
+    Main -->|Démo / Captures| DemoSrv
+    Main -->|Serveur sans GUI| Headless
+    WailsApp --> HTTP
+    WailsApp --> Tray
+    DemoSrv --> HTTP
+    Headless --> HTTP
 ```
 
-### Paramètres Techniques :
-* **Résolution Standard** : 1280x800 px (minimum 1024x600 px).
-* **Accélération Graphique** : `linux.WebviewGpuPolicyOnDemand`.
-* **Minimisation à la Fermeture** : `HideWindowOnClose: true`. Le clic sur la croix ("X") masque l'interface sans stopper les serveurs en arrière-plan.
+* **Desktop (Défaut)** : Fenêtre 1280x800 px (min 1024x600), `HideWindowOnClose: true`, verrou d'instance unique sur `/tmp/noxfort-monitor-singleinstance.sock`.
+* **Mode `--demo`** : Lance `RunDesktopServer()` sans fenêtre Wails pour automatisations et captures navigateur (`make record-demo`).
+* **Mode `--headless` / `--server-only`** : Fonctionne sans interface graphique ni dépendances X11/Wayland sous `SIGINT`/`SIGTERM`.
 
 ---
 
-## 2. Verrouillage d'Instance Unique (Socket IPC Unix)
+## 2. Fonctionnalités Interface & Sécurité
 
-Pour éviter les collisions de ports réseau (MQTT `:1883`, HTTP `:22100`) :
-1. `desktop.TryActivateExisting()` sonde `/tmp/noxfort-monitor-singleinstance.sock`.
-2. Si une instance existe déjà, elle transmet la commande `ACTIVATE` et quitte immédiatement avec le code `0`.
-3. L'instance active reçoit le signal, restaure la fenêtre depuis la barre d'état et la place au premier plan.
-
----
-
-## 3. Mode Serveur Headless (`--headless`)
-
-Pour les serveurs en nuage ou postes sans serveur d'affichage (X11 / Wayland) :
-```bash
-./bin/noxfort-monitor --headless
-# Ou via le Makefile :
-make run-headless
-```
-Dans ce mode, l'initialisation de l'interface graphique est contournée et le processus principal bloque sur les signaux système (`SIGINT`, `SIGTERM`).
+* **Polling Temps Réel (`/api/dashboard/summary`)** : Rafraîchit toutes les **10 secondes** les compteurs et nœuds dans les 5 états : `ONLINE`, `OFFLINE`, `PENDING`, `PAUSED` et `WAITING`.
+* **Vue Dédiée `403 Forbidden`** : Les comptes `OPERATOR` (lecture seule) accédant à des routes réservées (ex. `/users`) reçoivent [`web/templates/forbidden.html`](../../web/templates/forbidden.html) dans la fenêtre applicative au lieu de JSON brut.
+* **Changement de Mot de Passe Personnel** : Tous les utilisateurs (y compris `OPERATOR`) peuvent modifier leur mot de passe via `POST /api/users/password` (avec `current_password`).
+* **Masquage des Clés** : Les jetons initiaux dans `/devices` ne s'affichent qu'une seule fois ; `ApiKey`, `duckdns_token` et autres secrets sont masqués au rendu HTML suivant.
+* **Arrêt Propre** : Annule `bgCtx` (`RetentionManager`, backups planifiés, nettoyage de `sessions`) et appelle `AlertService.Shutdown(shutdownCtx)`.

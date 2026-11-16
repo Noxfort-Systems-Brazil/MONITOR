@@ -36,6 +36,7 @@ type SecurityManager struct {
 	hasher       PasswordHasher
 	sessionStore SessionStore
 	auditRepo    domain.AuditRepository
+	tracker      *LoginAttemptTracker
 }
 
 // NewSecurityManager creates a new SecurityManager instance with default PBKDF2 hasher and memory store.
@@ -43,12 +44,24 @@ func NewSecurityManager(userRepo domain.UserRepository) *SecurityManager {
 	return NewSecurityManagerWithCustom(userRepo, defaultHasher, NewMemorySessionStore(SessionTTL))
 }
 
+// NewPersistentSecurityManager creates a SecurityManager backed by a persistent SessionStore with the default PBKDF2 hasher.
+func NewPersistentSecurityManager(userRepo domain.UserRepository, sessionStore SessionStore) *SecurityManager {
+	return NewSecurityManagerWithCustom(userRepo, defaultHasher, sessionStore)
+}
+
 // NewSecurityManagerWithCustom creates a SecurityManager with injected PasswordHasher and SessionStore.
 func NewSecurityManagerWithCustom(userRepo domain.UserRepository, hasher PasswordHasher, sessionStore SessionStore) *SecurityManager {
+	if hasher == nil {
+		hasher = defaultHasher
+	}
+	if sessionStore == nil {
+		sessionStore = NewMemorySessionStore(SessionTTL)
+	}
 	return &SecurityManager{
 		userRepo:     userRepo,
 		hasher:       hasher,
 		sessionStore: sessionStore,
+		tracker:      NewLoginAttemptTracker(DefaultMaxFailedAttempts, DefaultAttemptWindow, DefaultLockoutDuration),
 	}
 }
 
@@ -85,6 +98,11 @@ func (sm *SecurityManager) HasAdmin() (bool, error) {
 
 // RegisterWithRole creates a new user account with an explicit role (ADMIN or OPERATOR).
 func (sm *SecurityManager) RegisterWithRole(username, password, role string) (*domain.User, error) {
+	return sm.RegisterWithRoleByActor(username, username, password, role, "")
+}
+
+// RegisterWithRoleByActor creates a new user account while attributing the audit log to the acting administrator.
+func (sm *SecurityManager) RegisterWithRoleByActor(actor, username, password, role, ip string) (*domain.User, error) {
 	username = strings.TrimSpace(username)
 	if username == "" || password == "" {
 		return nil, errors.New("Nome de usuário e senha são obrigatórios")
@@ -119,8 +137,12 @@ func (sm *SecurityManager) RegisterWithRole(username, password, role string) (*d
 		return nil, fmt.Errorf("falha ao salvar usuário: %w", err)
 	}
 
-	sm.logAudit(username, "USER_CREATE", fmt.Sprintf("Usuário cadastrado com perfil %s", role), "")
-	log.Printf("[SECURITY] Novo usuário '%s' cadastrado com perfil %s.", username, role)
+	auditActor := strings.TrimSpace(actor)
+	if auditActor == "" {
+		auditActor = username
+	}
+	sm.logAudit(auditActor, "USER_CREATE", fmt.Sprintf("Usuário '%s' cadastrado com perfil %s", username, role), ip)
+	log.Printf("[SECURITY] Novo usuário '%s' cadastrado com perfil %s por '%s'.", username, role, auditActor)
 	return user, nil
 }
 
@@ -145,26 +167,51 @@ func (sm *SecurityManager) Register(username, password string) (*domain.User, er
 
 // Authenticate verifies user credentials against the database.
 func (sm *SecurityManager) Authenticate(username, password string) (*domain.User, error) {
+	user, _, err := sm.AuthenticateWithAttempt(username, password, "")
+	return user, err
+}
+
+// AuthenticateWithAttempt verifies credentials while enforcing brute-force rate limiting and IP-aware auditing.
+func (sm *SecurityManager) AuthenticateWithAttempt(username, password, clientIP string) (*domain.User, domain.AuthAttemptResult, error) {
 	username = strings.TrimSpace(username)
 	if username == "" || password == "" {
-		sm.logAudit(username, "AUTH_LOGIN_FAILED", "Tentativa de login com campos vazios", "")
-		return nil, errors.New("Usuário e senha são obrigatórios")
+		sm.logAudit(username, "AUTH_LOGIN_FAILED", "Tentativa de login com campos vazios", clientIP)
+		return nil, domain.AuthAttemptResult{}, errors.New("Usuário e senha são obrigatórios")
+	}
+
+	if sm.tracker != nil {
+		if status, locked := sm.tracker.Check(username, clientIP); locked {
+			sm.logAudit(username, "AUTH_LOGIN_LOCKED", fmt.Sprintf("Login bloqueado por excesso de tentativas (%d/%d)", status.FailedAttempts, status.MaxAttempts), clientIP)
+			return nil, status, fmt.Errorf("Muitas tentativas inválidas. Tente novamente em %d segundos.", status.RetryAfterSeconds)
+		}
 	}
 
 	user, err := sm.userRepo.GetByUsername(username)
 	if err != nil || user == nil {
-		sm.logAudit(username, "AUTH_LOGIN_FAILED", "Usuário não encontrado", "")
-		return nil, errors.New("Usuário ou senha incorretos")
+		var status domain.AuthAttemptResult
+		if sm.tracker != nil {
+			status = sm.tracker.RecordFailure(username, clientIP)
+		}
+		sm.logAudit(username, "AUTH_LOGIN_FAILED", "Usuário não encontrado", clientIP)
+		return nil, status, errors.New("Usuário ou senha incorretos")
 	}
 
 	if !sm.hasher.Verify(password, user.PasswordHash) {
-		sm.logAudit(username, "AUTH_LOGIN_FAILED", "Senha incorreta", "")
-		return nil, errors.New("Usuário ou senha incorretos")
+		var status domain.AuthAttemptResult
+		if sm.tracker != nil {
+			status = sm.tracker.RecordFailure(username, clientIP)
+		}
+		sm.logAudit(username, "AUTH_LOGIN_FAILED", fmt.Sprintf("Senha incorreta (tentativa %d/%d)", status.FailedAttempts, status.MaxAttempts), clientIP)
+		return nil, status, errors.New("Usuário ou senha incorretos")
 	}
 
-	sm.logAudit(user.Username, "AUTH_LOGIN_SUCCESS", fmt.Sprintf("Login efetuado com perfil %s", user.Role), "")
+	if sm.tracker != nil {
+		sm.tracker.RecordSuccess(username, clientIP)
+	}
+
+	sm.logAudit(user.Username, "AUTH_LOGIN_SUCCESS", fmt.Sprintf("Login efetuado com perfil %s", user.Role), clientIP)
 	log.Printf("[SECURITY] Usuário '%s' (%s) logado com sucesso.", user.Username, user.Role)
-	return user, nil
+	return user, domain.AuthAttemptResult{MaxAttempts: DefaultMaxFailedAttempts}, nil
 }
 
 // CreateSession generates a new session token via the configured SessionStore.
@@ -182,14 +229,140 @@ func (sm *SecurityManager) RevokeSession(token string) {
 	sm.sessionStore.RevokeSession(token)
 }
 
+func (sm *SecurityManager) revokeUserSessions(username string) {
+	if revoker, ok := sm.sessionStore.(interface{ RevokeUserSessions(string) }); ok {
+		revoker.RevokeUserSessions(username)
+	}
+}
+
 // ListUsers returns all users in the system.
 func (sm *SecurityManager) ListUsers() ([]*domain.User, error) {
 	return sm.userRepo.List()
 }
 
+// ChangePassword updates an account's password after enforcing password policy, revoking existing sessions on change.
+// Non-admin callers changing their own password must supply the valid currentPassword.
+func (sm *SecurityManager) ChangePassword(actorUsername, targetUsername, currentPassword, newPassword, clientIP string) error {
+	targetUsername = strings.TrimSpace(targetUsername)
+	actorUsername = strings.TrimSpace(actorUsername)
+	if targetUsername == "" || newPassword == "" {
+		return errors.New("Usuário e nova senha são obrigatórios")
+	}
+
+	if err := ValidatePasswordComplexity(newPassword); err != nil {
+		return err
+	}
+
+	target, err := sm.userRepo.GetByUsername(targetUsername)
+	if err != nil || target == nil {
+		return errors.New("Usuário não encontrado")
+	}
+
+	isSelf := strings.EqualFold(actorUsername, targetUsername)
+	if isSelf && currentPassword != "" {
+		if !sm.hasher.Verify(currentPassword, target.PasswordHash) {
+			return errors.New("Senha atual incorreta")
+		}
+	} else {
+		actor, actorErr := sm.userRepo.GetByUsername(actorUsername)
+		if actorErr != nil || actor == nil || actor.Role != domain.RoleAdmin {
+			if !isSelf || currentPassword == "" {
+				return errors.New("Senha atual obrigatória ou permissão de administrador necessária")
+			}
+		}
+	}
+
+	hash, err := sm.hasher.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("falha ao criptografar nova senha: %w", err)
+	}
+
+	if err := sm.userRepo.UpdatePasswordHash(targetUsername, hash); err != nil {
+		return fmt.Errorf("falha ao atualizar senha: %w", err)
+	}
+
+	sm.revokeUserSessions(targetUsername)
+	if sm.tracker != nil {
+		sm.tracker.UnlockUser(targetUsername)
+	}
+
+	auditActor := actorUsername
+	if auditActor == "" {
+		auditActor = targetUsername
+	}
+	sm.logAudit(auditActor, "USER_PASSWORD_CHANGED", fmt.Sprintf("Senha atualizada para '%s'", targetUsername), clientIP)
+	return nil
+}
+
+// UpdateUserRole promotes or demotes an account between ADMIN and OPERATOR while safeguarding superuser and last admin.
+func (sm *SecurityManager) UpdateUserRole(actorUsername, targetUsername, newRole, clientIP string) error {
+	targetUsername = strings.TrimSpace(targetUsername)
+	newRole = strings.TrimSpace(newRole)
+	if newRole != domain.RoleAdmin && newRole != domain.RoleOperator {
+		return errors.New("Perfil inválido (deve ser ADMIN ou OPERATOR)")
+	}
+
+	target, err := sm.userRepo.GetByUsername(targetUsername)
+	if err != nil || target == nil {
+		return errors.New("Usuário não encontrado")
+	}
+
+	if strings.EqualFold(targetUsername, SuperuserUsername) && newRole != domain.RoleAdmin {
+		return fmt.Errorf("não é permitido rebaixar a conta de superusuário ('%s')", SuperuserUsername)
+	}
+
+	if target.Role == domain.RoleAdmin && newRole != domain.RoleAdmin {
+		admins, err := sm.userRepo.CountAdmins()
+		if err != nil {
+			return fmt.Errorf("falha ao verificar quantidade de administradores: %w", err)
+		}
+		if admins <= 1 {
+			return errors.New("não é possível rebaixar o último administrador do sistema")
+		}
+	}
+
+	if target.Role == newRole {
+		return nil
+	}
+
+	if err := sm.userRepo.UpdateRole(targetUsername, newRole); err != nil {
+		return fmt.Errorf("falha ao atualizar perfil: %w", err)
+	}
+
+	sm.revokeUserSessions(targetUsername)
+	auditActor := strings.TrimSpace(actorUsername)
+	if auditActor == "" {
+		auditActor = targetUsername
+	}
+	sm.logAudit(auditActor, "USER_ROLE_UPDATED", fmt.Sprintf("Perfil de '%s' alterado de %s para %s", targetUsername, target.Role, newRole), clientIP)
+	return nil
+}
+
+// UnlockAccount clears brute-force lockout counters for a username on administrator request.
+func (sm *SecurityManager) UnlockAccount(actorUsername, targetUsername, clientIP string) error {
+	targetUsername = strings.TrimSpace(targetUsername)
+	if targetUsername == "" {
+		return errors.New("Nome de usuário é obrigatório")
+	}
+	if sm.tracker != nil {
+		sm.tracker.UnlockUser(targetUsername)
+	}
+	auditActor := strings.TrimSpace(actorUsername)
+	if auditActor == "" {
+		auditActor = SuperuserUsername
+	}
+	sm.logAudit(auditActor, "USER_UNLOCKED", fmt.Sprintf("Bloqueio de tentativas removido para '%s'", targetUsername), clientIP)
+	return nil
+}
+
 // DeleteUser removes an operator or secondary administrator account.
 // Only the designated master superuser (SuperuserUsername resolved from .env or config) is protected from deletion.
 func (sm *SecurityManager) DeleteUser(username string) error {
+	return sm.DeleteUserByActor(username, username, "")
+}
+
+// DeleteUserByActor removes an account, revokes active sessions, prevents deleting superuser/last admin, and records audit actor + IP.
+func (sm *SecurityManager) DeleteUserByActor(actorUsername, username, clientIP string) error {
 	username = strings.TrimSpace(username)
 	user, err := sm.userRepo.GetByUsername(username)
 	if err != nil || user == nil {
@@ -200,9 +373,25 @@ func (sm *SecurityManager) DeleteUser(username string) error {
 		return fmt.Errorf("não é permitido excluir a conta de superusuário do sistema ('%s')", SuperuserUsername)
 	}
 
+	if user.Role == domain.RoleAdmin {
+		admins, err := sm.userRepo.CountAdmins()
+		if err == nil && admins <= 1 {
+			return errors.New("não é possível excluir o último administrador do sistema")
+		}
+	}
+
 	if err := sm.userRepo.DeleteByUsername(username); err != nil {
 		return err
 	}
-	sm.logAudit(username, "USER_DELETE", fmt.Sprintf("Conta de usuário '%s' (%s) excluída", username, user.Role), "")
+	sm.revokeUserSessions(username)
+	if sm.tracker != nil {
+		sm.tracker.UnlockUser(username)
+	}
+
+	auditActor := strings.TrimSpace(actorUsername)
+	if auditActor == "" {
+		auditActor = username
+	}
+	sm.logAudit(auditActor, "USER_DELETE", fmt.Sprintf("Conta de usuário '%s' (%s) excluída", username, user.Role), clientIP)
 	return nil
 }

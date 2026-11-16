@@ -1,6 +1,6 @@
 # 🏛️ Noxfort Monitor™: 系统架构与并发模型设计
 
-本文档详细规范 **Noxfort Monitor™ v2.0** 的内部技术架构，深入剖析事件驱动架构 (EDA)、Goroutine 并发调度模型、SOLID 分层边界及组合根组装机制。
+本文档规范 **Noxfort Monitor™ v2.0** 的内部架构设计：事件驱动架构 (EDA)、Goroutine 并发调度、Zero-Trust 设备接入、双引擎持久化、自动化保留及优雅停机。
 
 ⬅️ [文档中心](../README.md) | 📡 [API 规范](api_reference.md) | 🗄️ [数据库](database.md) | 🔐 [安全规范](security.md) | 🧪 [测试指南](testing.md)
 
@@ -8,64 +8,66 @@
 
 ## 1. 宏观架构设计哲学
 
-Noxfort Monitor 遵循严格的**事件驱动架构 (EDA)**，融合 **SOLID** 设计原则与**依赖注入 (DI)**，统一在 `cmd/server/main.go` 组合根中组装，杜绝共享全局可变状态及隐式初始化的包。
+Noxfort Monitor 严格遵循**事件驱动架构 (EDA)**、**SOLID** 原则与**依赖注入 (DI)**，统一在 [`cmd/server/main.go`](../../cmd/server/main.go) 中完成组装。引导配置通过 `LoadDotEnv()` 从 `.env` 读取（已移除旧版 `configs/config.yaml`），无隐藏全局可变状态。
 
 ```mermaid
 graph TD
     subgraph "外部世界与边缘节点"
         LocalDevice[本地设备 / 局域网]
-        RemoteDevice[远程智能体 / 广域网 (Carina, Synapse)]
+        RemoteDevice["远程智能体 / 广域网 (Carina, Synapse)"]
         Operator[浏览器 / 运维人员]
     end
 
-    subgraph "网络传输层"
-        MQTT[MQTT Broker :1883]
-        Ngrok[Ngrok 隧道 / 广域网 HTTPS]
-        HTTP[HTTP 服务器 :22100]
-        AuthMW[AuthMiddleware - RBAC]
+    subgraph "网络传输与安全层"
+        MQTT["MQTT Broker :1883 (noxfort/telemetry/#)"]
+        Proxy[Caddy / Ngrok / DuckDNS]
+        HTTP["HTTP 服务器 :22100"]
+        AuthMW["AuthMiddleware (DBSessionStore + Lockout + RBAC)"]
     end
 
-    subgraph "业务逻辑与安全层"
-        StateManager[状态管理器]
-        Watchdog[看门狗引擎]
-        Alerts[报警分发路由服务]
-        SecManager[安全管理器]
-        TunnelMgr[隧道管理器]
+    subgraph "业务逻辑与可观测性"
+        StateManager["StateManager (PAUSED 维护拦截)"]
+        Watchdog["Engine / 看门狗 (30s / 5m)"]
+        Writer[BufferedTelemetryWriter]
+        Alerts["AlertService (重试 + Shutdown)"]
+        Metrics["internal/metrics (/metrics)"]
     end
 
     subgraph "双引擎持久化层 (internal/storage)"
-        DBMgr[中央 DBManager]
-        AuditRepo[AuditRepository]
-        PG[(企业级 PostgreSQL)]
-        SQLite[(纯 Go 嵌入式 SQLite)]
+        DBMgr["DBManager (7 个可热重载仓储)"]
+        Retention["RetentionManager (90天)"]
+        Backup["BackupManager (VACUUM INTO / pg_dump)"]
+        PG[(PostgreSQL)]
+        SQLite[(SQLite WAL 纯 Go)]
     end
 
     subgraph "外部通知信道"
-        Telegram[Telegram Bot API (MarkdownV2)]
-        Email[SMTP 邮件服务器]
+        Telegram[Telegram Bot API MarkdownV2]
+        Email["SMTP (隐式 TLS 465 + CRLF 防护)"]
+        Webhook[Webhook HTTP]
     end
 
-    LocalDevice -- "MQTT 发布" --> MQTT
-    RemoteDevice -- "HTTPS POST /api/telemetry" --> Ngrok
-    Ngrok --> HTTP
-    Operator -- "HTTP GET / POST" --> HTTP
+    LocalDevice -->|"MQTT (MONITOR_MQTT_STRICT)"| MQTT
+    RemoteDevice -->|"POST /api/pair & /api/telemetry"| Proxy
+    Proxy -->|"X-Forwarded-For / Proto"| HTTP
+    Operator -->|"Cookie + RBAC"| HTTP
 
-    MQTT -- "解析报文" --> StateManager
-    HTTP --> AuthMW
-    AuthMW --> StateManager
-    AuthMW --> SecManager
+    MQTT --> StateManager
+    HTTP --> AuthMW --> StateManager
 
-    StateManager -- "1. 写入事件" --> DBMgr
-    StateManager -- "2. 触发报警" --> Alerts
-    Watchdog -- "轮询心跳" --> DBMgr
-    Watchdog -- "合成故障/恢复事件" --> Alerts
-    Watchdog -- "记录状态跳变" --> AuditRepo
+    StateManager --> Writer
+    StateManager --> Alerts
+    Watchdog --> DBMgr
+    Watchdog --> Alerts
+    Writer --> DBMgr
+    Retention --> DBMgr
+    Backup --> DBMgr
+    HTTP --> Metrics
 
-    Alerts -- "并发 Goroutine" --> Telegram
-    Alerts -- "并发 Goroutine" --> Email
-    Alerts -- "记录推送 SLA" --> AuditRepo
+    Alerts --> Telegram
+    Alerts --> Email
+    Alerts --> Webhook
 
-    SecManager -- "审计登录行为" --> AuditRepo
     DBMgr --> PG
     DBMgr --> SQLite
 ```
@@ -74,36 +76,17 @@ graph TD
 
 ## 2. 解耦子系统分层
 
-1. **传输层 (`internal/transport`)**：处理网络通信协议终止（基于 Paho 的 MQTT 客户端及带 `AuthMiddleware` 的 HTTP REST 服务）。
-2. **监控核心逻辑层 (`internal/monitor`)**：包含状态流转机 (`StateManager`)、静默故障检测引擎 (`Engine`/Watchdog) 及报警路由器 (`AlertService`)。
-3. **安全层 (`internal/security`)**：管理身份验证、加盐密码散列、会话有效性及基于角色的权限控制 (RBAC)。
-4. **远程访问层 (`internal/tunnel`)**：管理基于 Ngrok 的安全反向隧道，支持边缘节点穿透内网。
-5. **领域核心层 (`internal/domain`)**：定义核心实体与接口契约，不引入任何外部第三方依赖。
-6. **持久化层 (`internal/storage`)**：包含运行时热切换管理器 (`DBManager`)、PostgreSQL/SQLite 双驱动、SQL 方言转换器及异构数据迁移器。
-7. **桌面交互层 (`internal/desktop`, `internal/tray`)**：基于 Wails v2 与 WebKitGTK，提供 Unix IPC 套接字单实例锁及系统托盘常驻。
+1. **传输层 (`internal/transport`)**：MQTT 客户端（订阅 `noxfort/telemetry/#`、执行 `MONITOR_MQTT_STRICT`、启动 5 秒重连及 `/settings` 热更新 `Reconnect(brokerURL)`）与 HTTP REST 服务（`:22100`、`AuthMiddleware`、`/api/pair`、`/api/telemetry` 与 `/metrics`）。
+2. **监控逻辑与告警层 (`internal/monitor`)**：`StateManager`（遵循 `PAUSED` 维护状态并同步调用 `SaveEventReturningID`）、`Engine`（30s 心跳周期、5m 离线阈值与 `CleanupExpiredPending()`）以及 `AlertService`（`500ms`/`1500ms` 重试退避与 `Shutdown(ctx)`）。
+3. **安全层 (`internal/security`)**：`PBKDF2Hasher`（10万次迭代）、`LoginAttemptTracker`（5次/15m $\rightarrow$ 5m `429` 锁定）、`DBSessionStore`（`SHA-256` 存 `sessions` 表，24h TTL）、可信代理校验（`TRUSTED_PROXIES`、`MONITOR_USE_HTTPS`）及严格只读 RBAC（`OPERATOR` 仅可自助改密）。
+4. **远程隧道层 (`internal/tunnel`)**：DuckDNS 与 Ngrok 驱动管理 `/remote`，提供 HTML 秘钥遮罩。
+5. **持久化层 (`internal/storage`)**：`DBManager` 统一调度 SQLite WAL 与 PostgreSQL、7 个 `ReloadableRepository`（含 `DBSessionStore`）、单事务 9 表 `MigrateData`、`BufferedTelemetryWriter`、`BackupManager`（定时/下载/恢复）与 `RetentionManager`（`MONITOR_RETENTION_DAYS=90`）。
+6. **桌面、演示与指标层 (`internal/desktop`, `internal/tray`, `internal/metrics`)**：Wails v2 + WebKitGTK、Unix IPC 单实例锁、`--demo`（`RunDesktopServer()`）与 `--headless` 模式，以及原生 Prometheus `/metrics`。
 
 ---
 
-## 3. 并发调度与 Goroutine 线程模型
+## 3. 并发调度与优雅停机
 
-```mermaid
-graph TD
-    Main[主操作系统线程 / 根 Goroutine]
-    
-    Main -->|标准桌面模式| WailsEventLoop[Wails v2 桌面事件循环]
-    WailsEventLoop --> Systray[GTK 系统托盘回调]
-    WailsEventLoop --> WebKit[WebKitGTK 渲染窗口]
-    
-    Main -->|--headless 无头模式| SigChan[操作系统信号监听循环 (SIGINT/SIGTERM)]
-
-    Main -.->|go func| HTTPServer[HTTP 服务器 ListenAndServe :22100]
-    Main -.->|go func| MQTTListener[Paho MQTT 报文收发循环]
-    Main -.->|go func| WatchdogEngine[Ticker 定时循环 - 30秒间隔]
-    Main -.->|go func| AlertWorkers[并发邮件/Telegram 推送协程]
-```
-
-* **主操作系统线程**：在桌面模式下驱动 `desktopApp.Run()` (Wails v2)。在 `--headless` 模式下阻塞监听操作系统中断信号 (`syscall.SIGTERM`, `os.Interrupt`)。
-* **HTTP 服务器**：独立运行在 Goroutine 中，默认监听 `22100` 端口，具有 15 秒超时保护。
-* **MQTT 监听器**：Paho 客户端在独立的 Goroutine 中处理 `1883` 端口上的 TCP 报文。
-* **看门狗轮询**：通过 `time.Ticker` 定时器独立运行，检测设备静默状态（超时阈值为 5 分钟）。
-* **优雅停机机制**：由线程安全的 `sync.Once` 控制，依次释放网络套接字、关闭反向隧道并安全释放数据库连接池。
+* **主线程**：标准模式驱动 `desktopApp.Run()`；`--demo` 启动 `RunDesktopServer()`；`--headless` / `--server-only` 阻塞监听 `SIGINT`/`SIGTERM`。
+* **后台 Goroutine (`bgCtx`)**：独立运行 HTTP `:22100`、MQTT 收发与重连、异步批量写入、`Engine`（30s）、每小时 `sessions` 清理、24 小时 `RetentionManager` 及定时备份（`MONITOR_BACKUP_INTERVAL_HOURS`）。
+* **停机排空 (`AlertService.Shutdown`)**：关闭前等待告警分发队列排空后再释放数据库与 MQTT 连接。
